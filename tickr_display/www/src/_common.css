@@ -1,0 +1,20 @@
+/* Shared by every page: theme palette (light + dark), base layout, nav, cards, buttons.
+   Inlined into each page's <head> by scripts/build_www.py via _head.html. */
+:root{--bg:#f4f4f9;--fg:#333;--c1:#fff;--c2:#f9f9f9;--in:#fff;--bd:#e0e0e0;--mu:#666;--ac:#4CAF50;--ab:#e8f5e9;--bt:#2196F3;--bh:#1976D2;--er:#c62828}
+[data-theme=dark]{--bg:#15171a;--fg:#e3e5e8;--c1:#1f2226;--c2:#282c31;--in:#15171a;--bd:#41464d;--mu:#a3a9b0;--ac:#81c784;--ab:#24352a;--bt:#3b8be0;--bh:#5b9fe8;--er:#ef5350;color-scheme:dark}
+#th{margin-left:auto;padding:4px;border:1px solid var(--bd);border-radius:4px;background:var(--in);color:var(--fg);font-size:13px}
+body{font-family:Arial,sans-serif;margin:0;padding:20px;background:var(--bg);color:var(--fg)}
+.container{max-width:600px;margin:0 auto;background:var(--c1);padding:25px;border-radius:12px;box-shadow:0 4px 6px rgba(0,0,0,.1)}
+h2{margin-top:0;border-bottom:2px solid var(--bd);padding-bottom:10px}
+.nav{margin-bottom:20px;display:flex;gap:15px;align-items:center;flex-wrap:wrap}
+.nav a{color:var(--ac);text-decoration:none;font-weight:bold;padding:5px 10px;border-radius:4px;background:var(--ab)}
+.nav a:hover{opacity:.8}
+.card{background:var(--c2);padding:15px;border-radius:8px;margin-bottom:15px}
+button{background:var(--bt);color:#fff;border:0;padding:12px;border-radius:6px;cursor:pointer;font-size:14px;transition:background .3s}
+button:hover{background:var(--bh)}
+button.sm{padding:4px 8px;font-size:12px}
+.err{color:var(--er)}
+/* read-only mode without a token (_auth.js): controls of class "w" are greyed, the token bar is shown */
+.ro .w{opacity:.45;pointer-events:none}
+#tokbar:not([hidden]){display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--er)}#tokbar .t{flex:1;min-width:220px}
+#tokbar input{flex:1;min-width:160px;width:auto;padding:8px;border:1px solid var(--bd);border-radius:4px;background:var(--in);color:var(--fg);font-size:14px}

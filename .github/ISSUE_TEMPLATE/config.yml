@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/vskiwi/tickrdisplay/security/advisories/new
+    about: Please report security issues privately, not as a public issue.
+  - name: Flashing / recovery help
+    url: https://github.com/vskiwi/tickrdisplay/blob/main/docs/FLASHING.md
+    about: Read docs/FLASHING.md first; it covers backup, OTA, UART and going back to stock.

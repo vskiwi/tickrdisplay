@@ -1,0 +1,156 @@
+<!DOCTYPE html><html><head>
+<title>TickrDisplay System</title>
+{{include:_head.html}}
+<style>
+.container{max-width:720px}
+details{background:var(--c2);border-radius:8px;margin-bottom:12px}
+summary{padding:12px 15px;font-weight:bold;cursor:pointer;font-size:17px}
+summary span{font-weight:normal;color:var(--mu);font-size:13px;margin-left:8px}
+.body{padding:0 15px 15px}
+details.adv{background:none;border:1px dashed var(--bd);margin-top:12px}details.adv summary{font-size:14px;padding:8px 12px}
+label{display:block;margin:10px 0 4px;color:var(--mu)}
+input[type=text],input[type=number],input[type=password],textarea,select{width:100%;padding:9px;border:1px solid var(--bd);border-radius:4px;box-sizing:border-box;font-size:15px;background:var(--in);color:var(--fg)}
+textarea{font-family:monospace;font-size:12px;height:100px}
+.hint{font-size:12px;color:var(--mu);margin-top:4px}
+.inline label{display:inline;margin-left:6px}
+.kv{display:flex;justify-content:space-between;gap:10px;margin-bottom:5px}.k{color:var(--mu)}.v{font-weight:bold;text-align:right;word-break:break-all}
+button:disabled{opacity:.45;cursor:default}
+button.warn{background:#ff9800}button.danger{background:var(--er)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+input[type=file]{max-width:100%;min-width:0;flex:1}
+.bar{background:var(--bd);border-radius:6px;height:16px;overflow:hidden;margin:8px 0;display:none}.bar div{background:var(--ac);height:100%;width:0}
+#msg,#um{font-weight:bold;margin:8px 0}#msg:empty,#um:empty{display:none}.ok{color:var(--ac)}
+.save{position:sticky;bottom:0;background:var(--c1);padding:10px 0;display:flex;gap:10px;align-items:center}
+a{color:var(--ac)}
+</style>
+<script>{{include:_auth.js}}</script>
+<script>
+var info=null,WHO='';
+function $(i){return document.getElementById(i)}
+function get(u){return fetch(u,{headers:hdr(),cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})}
+function post(u,b){return fetch(u,{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:b?JSON.stringify(b):''}).then(function(r){return r.json()})}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return'&#'+c.charCodeAt(0)+';'})}
+function kv(k,v){return'<div class="kv"><span class="k">'+k+'</span><span class="v">'+esc(v)+'</span></div>'}
+function kb(n){return(n/1024).toFixed(0)+' KB'}
+function dur(s){return s<3600?Math.floor(s/60)+' min':s<86400?(s/3600).toFixed(1)+' h':(s/86400).toFixed(1)+' d'}
+function msg(t,c){$('msg').textContent=t;$('msg').className=c||''}
+function um(t,c){$('um').textContent=t;$('um').className=c||''}
+// ---- configuration (GET /api/config -> form; POST /config, same fields as before the merge) ----------
+function loadConfig(){var f=$('f');return get('/api/config').then(function(c){
+f.mqtt_server.value=c.mqtt_server;f.mqtt_port.value=c.mqtt_port;f.mqtt_topic.value=c.mqtt_topic;f.mqtt_user.value=c.mqtt_user;f.mqtt_pass.placeholder=c.mqtt_pass_set?'(unchanged)':'(not set)';
+f.pull_url.value=c.pull_url;f.refresh_interval.value=c.refresh_interval;$('ca').textContent=c.tls_ca_set?'uploaded':'none';
+f.api_token.placeholder=c.api_token_set?'(unchanged - type a new one to replace it)':'(not set - the API is open to the whole network)';$('ss').textContent=c.api_token_set?'token set':'no token - open';
+f.ota_password.placeholder=c.ota_password_set?'(unchanged)':'(not set - push-OTA disabled)';$('og').hidden=!c.arduino_ota_build;
+$('cs').textContent=c.mqtt_server?'MQTT '+c.mqtt_server:c.pull_url?'pull every '+c.refresh_interval+' min':'push only';
+$('save').disabled=false;if($('msg').className=='err')msg('')}).catch(function(e){if(/401/.test(e.message))on401();else msg('Failed to load the configuration ('+e.message+'). Reload the page before saving.','err')})}
+function save(){var f=$('f'),b=new URLSearchParams(new FormData(f)).toString(),nt=f.api_token.value,cl=f.api_token_clear.checked;$('save').disabled=true;msg('Saving\u2026');
+fetch('/config',{method:'POST',headers:hdr({'Content-Type':'application/x-www-form-urlencoded'}),body:b}).then(function(r){return r.text().then(function(t){
+if(!r.ok)throw new Error(t.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim()||('HTTP '+r.status));
+// keep this browser's copy of the token in step with the device (the panel and /dev read the same key)
+if(cl){T=null;try{delete localStorage.tickr_token}catch(e){}}else if(nt){T=nt;try{localStorage.tickr_token=nt}catch(e){}}
+f.api_token.value=f.mqtt_pass.value=f.ota_password.value=f.tls_ca_pem.value='';f.api_token_clear.checked=f.mqtt_pass_clear.checked=f.tls_ca_clear.checked=f.ota_password_clear.checked=false;
+msg('Saved.','ok');return loadConfig()})}).catch(function(e){msg('Not saved: '+e.message,'err');$('save').disabled=false});return false}
+// ---- status / network / firmware ---------------------------------------------------------------------
+function volt(x){return x==null?'\u2014':(+x).toFixed(2)+' V'}
+function loadStatus(){return get('/api/status').then(function(s){if(!T)ro(s.auth_enabled);var v=volt(s.vsys_v),src={usb:'USB',battery:'Battery'}[s.power]||'Unknown',m=s.power_mode||'auto',o='',i,ms=['auto','usb','battery'];
+for(i=0;i<3;i++)o+='<option value="'+ms[i]+'"'+(m==ms[i]?' selected':'')+'>'+(i?'always '+ms[i]:'auto (detect)')+'</option>';
+$('pw').innerHTML=kv('Power source',src+(m!='auto'?' (forced)':''))+kv('Cell / VIN',v+' / '+volt(s.vin_v))+(s.board?kv('Board revision',s.board):'')+kv('Uptime',dur(s.uptime_s))+kv('Free heap',kb(s.heap_free)+' (min '+kb(s.heap_min_free)+')')+
+kv('MQTT',s.mqtt_enabled?(s.mqtt_connected?'connected':'disconnected (state '+s.mqtt_state+')'):'off')+kv('HTTPS pull',!s.pull_https?'n/a (http)':s.tls_ca?'CA verified':'INSECURE - no CA uploaded, certificate not verified')+kv('Last error',s.last_error||'-')+
+'<label>Power source override</label><select id="pm" class="w" onchange="setMode(this.value)">'+o+'</select><div class="hint">Applied at once and saved. <i>auto</i> detects USB/battery; force it when the detection is wrong for your board or adapter.</div>';
+$('ps').textContent=src+(s.vsys_v==null?'':' \u00b7 '+v);$('wi').textContent=s.ip+' \u00b7 '+s.rssi+' dBm'}).catch(function(e){$('pw').innerHTML='<span class="err">Failed to load /api/status: '+esc(e.message)+'</span>'})}
+function setMode(m){fetch('/api/power/source',{method:'POST',headers:hdr({'Content-Type':'application/x-www-form-urlencoded'}),body:'mode='+m}).then(function(r){return r.json()}).then(function(j){if(!j.ok)throw new Error(j.error||'failed');msg('Power source: '+j.mode+' (now '+j.source+')','ok');loadStatus()}).catch(function(e){msg('Not saved: '+e.message,'err')})}
+function loadWifi(){return get('/api/wifi/status').then(function(w){$('wf').textContent=w.state=='connected'?'connected to '+w.ssid:w.state;$('ns').textContent=w.ssid||'';$('wl').hidden=!w.captive;$('wh').hidden=!!w.captive;
+if(w.ip&&w.ip!='0.0.0.0')$('wi').textContent=w.ip+(w.rssi?' \u00b7 '+w.rssi+' dBm':'')}).catch(function(){$('wf').textContent='?'})}
+function other(){return((info||{}).partitions||[]).filter(function(p){return p.type=='app'&&!p.running&&p.bootable})}
+function loadInfo(){return get('/api/system/info').then(function(d){info=d;var fw=d.firmware||{},r=d.running||{},n=d.next_update,c=d.chip||{},f=d.flash||{},ao=d.arduino_ota||{},o=other();
+$('fw').innerHTML=kv('Version',fw.version+' \u00b7 built '+fw.build)+kv('Running slot',r.label+(d.boot&&d.boot.label!=r.label?' (boots '+d.boot.label+' next)':''))+kv('Next slot',n?n.label+' ('+kb(n.size)+')':'none')+kv('Image',kb(fw.sketch_size)+' \u00b7 MD5 '+fw.sketch_md5);
+$('fs').textContent=fw.version;$('bo').disabled=o.length!=1;$('bo').textContent='Boot other partition'+(o.length==1?' ('+o[0].label+')':'');$('dv').hidden=$('dv2').hidden=!d.dev_page;
+$('ab').innerHTML=kv('Device',WHO)+kv('Firmware',fw.name+' '+fw.version+' \u00b7 '+fw.sdk)+kv('Chip',c.model+' rev'+c.revision+', '+c.mac)+kv('Flash',kb(f.chip_size)+' (bootloader)'+(f.chip_size_jedec?', '+kb(f.chip_size_jedec)+' physical':''))+kv('Reset reason',d.reset_reason)+
+kv('LAN push-OTA',ao.enabled?ao.hostname+'.local:'+ao.port:ao.built===false?'not in this build':'disabled')}).catch(function(e){$('fw').innerHTML='<span class="err">Failed to load /api/system/info: '+esc(e.message)+'</span>'})}
+function upload(){var f=$('file').files[0];if(!f){um('Choose a .bin file first','err');return}
+var n=info&&info.next_update;if(n&&f.size>n.size){um('Image ('+f.size+' bytes) is larger than the OTA slot '+n.label+' ('+n.size+' bytes)','err');return}
+if(!confirm('Flash "'+f.name+'" ('+f.size+' bytes) to '+(n?n.label:'the next OTA slot')+' and reboot?'))return;
+var fd=new FormData();fd.append('update',f,f.name);var x=new XMLHttpRequest();x.open('POST','/update');if(T)x.setRequestHeader('X-Api-Token',T);
+$('up').disabled=true;$('bar').style.display='block';$('prog').style.width='0';um('Uploading\u2026');
+x.upload.onprogress=function(e){if(e.lengthComputable){var p=Math.round(e.loaded*100/e.total);$('prog').style.width=p+'%';um('Uploading\u2026 '+p+'%')}};
+x.onload=function(){var r={};try{r=JSON.parse(x.responseText)}catch(e){}
+if(x.status==200&&r.ok){um('Update successful ('+r.written+' bytes to '+r.target+'). Rebooting\u2026','ok');setTimeout(function(){location.reload()},15000)}else{um('Update failed: '+(r.error||x.statusText||x.status),'err');$('up').disabled=false}};
+x.onerror=function(){um('Upload failed (connection lost)','err');$('up').disabled=false};x.send(fd)}
+function reboot(){if(!confirm('Reboot the device?'))return;post('/api/system/restart').then(function(){um('Rebooting\u2026','ok');setTimeout(function(){location.reload()},8000)}).catch(function(e){um('Error: '+e,'err')})}
+function bootOther(){var o=other();if(o.length!=1){um(o.length?'Several candidates - use /api/system/boot_partition':'No other bootable app partition','err');return}
+if(!confirm('Set the boot partition to "'+o[0].label+'" and reboot?\n\nIf that slot holds the stock firmware you leave TickrDisplay (back: stock portal 192.168.4.1/update or recovery mode).'))return;
+post('/api/system/boot_partition',{label:o[0].label}).then(function(r){um(r.ok?'Boot partition set to '+o[0].label+'. Rebooting\u2026':'Failed: '+r.error,r.ok?'ok':'err')}).catch(function(e){um('Error: '+e,'err')})}
+// ---- boot: token from localStorage; #hash opens that section; on a phone only that section is open ---
+function init(){var h=location.hash.slice(1),t=h&&$(h),all=document.querySelectorAll('details'),i;
+if(t){for(var p=t;p&&p.tagName;p=p.parentNode)if(p.tagName=='DETAILS')p.open=true}
+if(innerWidth<=480)for(i=0;i<all.length;i++)if(!t||!all[i].contains(t))all[i].open=false;
+if(t)t.scrollIntoView();
+get('/api/identity').then(function(d){WHO=d.name+' \u00b7 '+d.id+' \u00b7 '+d.ip;$('who').textContent=d.name}).catch(function(){});
+loadConfig();loadStatus();loadWifi();loadInfo()}
+</script>
+</head>
+<body>
+<div class="container">
+{{include:_nav.html}}
+<h2>System <span id="who" class="hint" style="display:inline;font-weight:normal"></span></h2>
+{{include:_tokbar.html}}
+<div id="msg"></div>
+<form id="f" onsubmit="return save()">
+<details id="network" open><summary>Network<span id="ns"></span></summary><div class="body">
+  <div class="kv"><span class="k">Wi-Fi</span><span class="v" id="wf">&hellip;</span></div>
+  <div class="kv"><span class="k">IP &middot; signal</span><span class="v" id="wi">&hellip;</span></div>
+  <div class="hint" id="wh">To change the network: switch the device off and on <b>3 times</b> within 20 s (recovery mode), join the access point <b>TickrDisplay</b>, open <code>http://192.168.244.1/</code>.</div>
+  <div class="hint" id="wl" hidden><a href="/wifi">Change the Wi-Fi network&hellip;</a></div>
+</div></details>
+<details id="content" open><summary>Content source<span id="cs"></span></summary><div class="body">
+  <label>Pull URL &mdash; the device GETs a payload from here on every refresh (the only source on battery)</label>
+  <input type="text" name="pull_url" maxlength="127" placeholder="http://server/api/data">
+  <label>Refresh interval, minutes (1&ndash;1440)</label>
+  <input type="number" name="refresh_interval" min="1" max="1440">
+  <label>MQTT server &mdash; empty = off</label>
+  <input type="text" name="mqtt_server" maxlength="63" placeholder="192.168.1.100">
+  <label>MQTT port</label>
+  <input type="number" name="mqtt_port" min="1" max="65535">
+  <label>MQTT topic &mdash; every message is a payload; online/offline goes to <code>&lt;topic&gt;/status</code></label>
+  <input type="text" name="mqtt_topic" maxlength="63">
+  <div class="hint">Push (<code>POST /api/screen</code>) works at any time. MQTT credentials, TLS root CA: <i>Advanced</i>.</div>
+</div></details>
+<details id="security" open><summary>Security<span id="ss"></span></summary><div class="body">
+  <label>API token</label>
+  <input type="password" name="api_token" maxlength="63" autocomplete="new-password">
+  <div class="inline"><input type="checkbox" name="api_token_clear" value="1" id="atc"><label for="atc">Remove the token (API open to the whole network)</label></div>
+  <div class="hint">Required for every change, upload and secret (<code>POST /config</code>, mutating <code>/api/*</code>, <code>/update</code>, raw partitions): header <code>X-Api-Token</code> or HTTP Basic (any user, password = token). Read-only data stays open. Kept in this browser for every page. Lost it? Recovery mode: off/on 3 times.</div>
+</div></details>
+<details id="power" open><summary>Power<span id="ps"></span></summary><div class="body" id="pw">&hellip;</div></details>
+<details id="firmware" open><summary>Firmware<span id="fs"></span></summary><div class="body">
+  <div id="fw">&hellip;</div>
+  <div class="row w"><input type="file" id="file" accept=".bin,application/octet-stream"><button type="button" id="up" onclick="upload()">Upload &amp; flash</button></div>
+  <div class="bar" id="bar"><div id="prog"></div></div><div id="um"></div>
+  <div class="hint">The image goes to the inactive slot and becomes the boot partition; the previous firmware stays in the other slot. Do not remove power meanwhile.</div>
+  <details class="adv" id="recovery"><summary>Recovery</summary><div class="body">
+    <div class="row w"><button type="button" class="warn" onclick="reboot()">Reboot</button><button type="button" class="danger" id="bo" onclick="bootOther()" disabled>Boot other partition</button></div>
+    <div class="hint"><i>Boot other partition</i> restarts with the image in the other slot (previous TickrDisplay or the stock firmware); nothing is flashed. Without token or network: switch off and on 3 times, follow the screen.<span id="dv2" hidden> Partition table, raw downloads, coredump: <a href="/dev#parts">Diagnostics</a>.</span></div>
+  </div></details>
+</div></details>
+<details id="advanced"><summary>Advanced</summary><div class="body">
+  <label>MQTT username (optional)</label>
+  <input type="text" name="mqtt_user" maxlength="31" autocomplete="off">
+  <label>MQTT password (optional)</label>
+  <input type="password" name="mqtt_pass" maxlength="63" autocomplete="new-password">
+  <div class="inline"><input type="checkbox" name="mqtt_pass_clear" value="1" id="mpc"><label for="mpc">Clear the stored password</label></div>
+  <label>TLS root CA (PEM) for an https:// pull URL &mdash; current: <span id="ca">&hellip;</span>. Without it the certificate is not verified.</label>
+  <textarea name="tls_ca_pem" placeholder="-----BEGIN CERTIFICATE-----&#10;...&#10;-----END CERTIFICATE-----"></textarea>
+  <div class="inline"><input type="checkbox" name="tls_ca_clear" value="1" id="tcc"><label for="tcc">Remove the stored CA</label></div>
+  <div id="og" hidden>
+    <label>OTA password &mdash; LAN push-OTA (espota, port 3232, tickr_dev build); applied after a reboot</label>
+    <input type="password" name="ota_password" maxlength="63" autocomplete="new-password">
+    <div class="inline"><input type="checkbox" name="ota_password_clear" value="1" id="opc"><label for="opc">Clear the password (disable push-OTA)</label></div>
+  </div>
+  <div class="hint" style="margin-top:12px"><a href="/api/system/info" target="_blank">System info (JSON)</a><span id="dv" hidden> &middot; <a href="/dev">Diagnostics &amp; tests</a></span></div>
+</div></details>
+<details id="about"><summary>About</summary><div class="body" id="ab">&hellip;</div></details>
+<div class="save"><button type="submit" id="save" class="w" disabled>Save</button><span class="hint">Saves all sections. Empty secret fields keep the stored value.</span></div>
+</form>
+</div>
+<script>init();</script>
+</body></html>

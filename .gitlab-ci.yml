@@ -1,0 +1,87 @@
+# GitLab CI for TickrDisplay firmware (mirrors .github/workflows/build.yml).
+
+image: python:3.12
+
+stages:
+  - build
+  - test
+  - release
+
+variables:
+  PLATFORMIO_VERSION: "6.2.0"
+  # Keep PlatformIO packages inside the project dir so they can be cached.
+  PLATFORMIO_CORE_DIR: "$CI_PROJECT_DIR/.platformio"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  # Full clone: `git describe` needs the tags for FIRMWARE_VERSION.
+  GIT_DEPTH: "0"
+  # LeakSanitizer needs ptrace, which is usually unavailable inside CI containers.
+  ASAN_OPTIONS: "detect_leaks=0"
+
+.platformio:
+  before_script:
+    - pip install "platformio==${PLATFORMIO_VERSION}"
+    - cd tickr_display
+  cache:
+    key:
+      files:
+        - tickr_display/platformio.ini
+    paths:
+      - .platformio/
+      - .cache/pip/
+
+firmware:
+  extends: .platformio
+  stage: build
+  script:
+    # tickr_dev (ArduinoOTA + mDNS) is built only to keep that code compiling;
+    # it is neither size-gated nor released.
+    - pio run -e tickr -e tickr_dev
+    - python scripts/check_size.py $(ls dist/*.bin | grep -v -- '-dev.bin')
+  artifacts:
+    name: "tickrdisplay-$CI_COMMIT_REF_SLUG"
+    paths:
+      - tickr_display/dist/*.bin
+    exclude:
+      - tickr_display/dist/*-dev.bin
+    expire_in: 30 days
+
+unit-tests:
+  extends: .platformio
+  stage: test
+  needs: []
+  script:
+    - pio test -e native
+
+cppcheck:
+  extends: .platformio
+  stage: test
+  needs: []
+  script:
+    - pio check -e tickr --skip-packages --fail-on-defect=high
+
+release:
+  stage: release
+  image: registry.gitlab.com/gitlab-org/release-cli:latest
+  needs:
+    - job: firmware
+      artifacts: true
+    - unit-tests
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v/
+  script:
+    - echo "Creating release $CI_COMMIT_TAG"
+  release:
+    tag_name: "$CI_COMMIT_TAG"
+    name: "TickrDisplay $CI_COMMIT_TAG"
+    description: |
+      TickrDisplay $CI_COMMIT_TAG
+
+      * `tickrdisplay-$CI_COMMIT_TAG.bin` - OTA (stock `/update`) or UART, 4 MB partition table (`default.csv`), safe on any device.
+
+      See `docs/FLASHING.md` and `docs/DEVELOPMENT.md`.
+    assets:
+      links:
+        - name: "Firmware binaries (job artifacts)"
+          url: "$CI_PROJECT_URL/-/jobs/artifacts/$CI_COMMIT_TAG/download?job=firmware"
+          link_type: package

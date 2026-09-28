@@ -1,0 +1,137 @@
+<!DOCTYPE html><html><head>
+<title>TickrDisplay Wi-Fi</title>
+{{include:_head.html}}
+<style>
+.container{max-width:480px}
+label{display:block;margin-bottom:5px;color:var(--mu);font-weight:500}
+input[type=text],input[type=password]{width:100%;padding:10px;border:1px solid var(--bd);border-radius:4px;box-sizing:border-box;font-size:16px;background:var(--in);color:var(--fg);margin-bottom:12px}
+button{width:100%}
+button:disabled{opacity:.45;cursor:default}
+button.sec{background:var(--c2);color:var(--fg);border:1px solid var(--bd);margin-top:10px}
+#nets{list-style:none;padding:0;margin:0 0 10px 0;max-height:260px;overflow:auto}
+#nets li{display:flex;justify-content:space-between;padding:9px 10px;border-bottom:1px solid var(--bd);cursor:pointer}
+#nets li:hover,#nets li.sel{background:var(--ab)}
+#nets .r{color:var(--mu);font-size:13px;white-space:nowrap;margin-left:10px}
+.hint{font-size:12px;color:var(--mu);margin-top:-6px;margin-bottom:12px}
+#st{font-weight:bold;min-height:1.2em}
+.ok{color:#2e7d32}[data-theme=dark] .ok{color:#66bb6a}
+.stat-row{display:flex;justify-content:space-between;margin-bottom:6px}
+.k{color:var(--mu)}
+#rec button{margin-top:8px}
+#rec .danger{background:var(--er)}
+#tok{font:bold 18px monospace;word-break:break-all;margin:8px 0;user-select:all}
+</style>
+</head><body><div class="container">
+{{include:_nav.html}}
+<h2>Wi-Fi setup</h2>
+<div class="card">
+  <div class="stat-row"><span class="k">Status</span><span id="cur">&hellip;</span></div>
+  <div class="stat-row"><span class="k">IP address</span><span id="ip">&hellip;</span></div>
+</div>
+<div class="card" id="portal_off" hidden>
+  <div class="hint" style="margin:0">Changing the network is only possible at the device: switch it off and on <b>three times</b> (each time within 20 s of the start) for recovery mode, or power-cycle it while its saved network is unreachable; then join the open access point <b>TickrDisplay</b> and open <code>http://192.168.244.1/</code>.</div>
+</div>
+<div id="rec" hidden>
+<h2>Recovery</h2>
+<div class="card">
+  <div class="stat-row"><span class="k">Mode</span><span id="rs">&hellip;</span></div>
+  <div class="hint">Normal operation continues. Actions work only from the <b>TickrDisplay</b> access point.</div>
+  <div id="tokbox" hidden><div class="hint">New API token &ndash; shown once, copy it now:</div><div id="tok"></div><button class="sec" onclick="navigator.clipboard&&navigator.clipboard.writeText($('tok').textContent)">Copy token</button></div>
+  <button class="sec" onclick="act('token','mode=new','Replace the API token?')">New API token</button>
+  <button class="sec" id="rtc" onclick="act('token','mode=clear','Remove the API token? The API becomes open to the whole network.')">Remove API token</button>
+  <button class="sec" id="rlg" onclick="act('group/leave','','Leave the group?')">Leave group</button>
+  <button class="sec" onclick="act('wifi','','Forget the saved Wi-Fi network? Pick a new one above, or the setup portal opens on the next start.')">Forget Wi-Fi network</button>
+  <button class="sec" id="rbp" onclick="act('boot/previous','','Restart with the previous firmware?')">Boot previous firmware</button>
+  <label style="margin-top:12px"><input type="checkbox" id="fwifi"> also forget the Wi-Fi network</label>
+  <button class="danger" onclick="act('factory',$('fwifi').checked?'wifi=1':'','Erase ALL settings (MQTT, pull URL, token, name, group, layout, CA) and restart?')">Factory reset</button>
+  <div id="rst" class="hint" style="margin-top:8px"></div>
+</div>
+</div>
+<h2>Networks</h2>
+<div class="card">
+  <ul id="nets"><li><span class="k">Scanning&hellip;</span></li></ul>
+  <button class="sec" onclick="scan(true)">Rescan</button>
+</div>
+<h2>Connect</h2>
+<div class="card">
+  <label>Network name (SSID)</label>
+  <input type="text" id="ssid" maxlength="32" autocapitalize="off" autocorrect="off">
+  <label>Password</label>
+  <input type="password" id="pass" maxlength="63" autocomplete="off">
+  <div class="hint">Leave empty for an open network.</div>
+  <button id="btn" onclick="connect()">Connect</button>
+  <div id="st"></div>
+</div>
+<div class="hint">Firmware update in setup mode: <a href="/system#firmware">/system</a>. Once connected, the device is reachable at <code>http://&lt;ip&gt;/</code> on your network.</div>
+</div>
+<script>
+var portal=false,poll=null,scanTimer=null,tries=0;
+function $(i){return document.getElementById(i)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]})}
+function st(t,cls){$('st').textContent=t;$('st').className=cls||''}
+function get(u){return fetch(u,{cache:'no-store'}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})}
+function bars(r){return r>=-55?'\u2588\u2588\u2588\u2588':r>=-65?'\u2588\u2588\u2588\u2591':r>=-75?'\u2588\u2588\u2591\u2591':'\u2588\u2591\u2591\u2591'}
+function pick(li,s){var l=$('nets').children;for(var i=0;i<l.length;i++)l[i].className='';li.className='sel';$('ssid').value=s;$('pass').focus()}
+function showNets(d){
+ var ul=$('nets');ul.innerHTML='';
+ if(!d.networks||!d.networks.length){ul.innerHTML='<li><span class="k">No networks found</span></li>';return}
+ d.networks.forEach(function(n){
+  var li=document.createElement('li');
+  li.innerHTML='<span>'+esc(n.ssid)+(n.secure?' \uD83D\uDD12':'')+'</span><span class="r">'+bars(n.rssi)+' '+n.rssi+' dBm</span>';
+  li.onclick=function(){pick(li,n.ssid)};
+  ul.appendChild(li);
+ });
+}
+function scan(force){
+ if(scanTimer){clearTimeout(scanTimer);scanTimer=null}
+ if(force)$('nets').innerHTML='<li><span class="k">Scanning\u2026</span></li>';
+ get('/api/wifi/scan'+(force?'?rescan=1':'')).then(function(d){
+  if(d.status==='scanning'){if(++tries<15)scanTimer=setTimeout(function(){scan(false)},1000);else $('nets').innerHTML='<li><span class="k">Scan timed out - press Rescan</span></li>';return}
+  tries=0;showNets(d);
+ }).catch(function(e){$('nets').innerHTML='<li><span class="err">Scan failed: '+esc(e.message)+'</span></li>'});
+}
+function status(){
+ return get('/api/wifi/status').then(function(d){
+  portal=d.captive;
+  $('portal_off').hidden=portal;
+  $('btn').disabled=!portal||d.state==='connecting';
+  $('cur').textContent=d.state==='connected'?'connected to '+d.ssid:(d.state==='connecting'?'connecting to '+d.ssid+'\u2026':(d.state==='failed'?'not connected':(d.saved?'not connected (saved network unreachable)':'not connected')));
+  $('ip').textContent=d.ip&&d.ip!=='0.0.0.0'?d.ip:'-';
+  if(d.state==='connecting')st('Connecting to '+d.ssid+'\u2026');
+  else if(d.state==='failed')st('Connection failed: '+(d.error||'unknown error')+'. Check the password and try again.','err');
+  else if(d.state==='connected'&&portal)st('Connected! IP '+d.ip+'. '+(d.portal?'The setup access point closes in a few seconds - reconnect your phone/laptop to your own Wi-Fi and open http://'+d.ip+'/':'From your own Wi-Fi the device is at http://'+d.ip+'/'),'ok');
+  return d;
+ });
+}
+function connect(){
+ var s=$('ssid').value.trim(),p=$('pass').value;
+ if(!s){st('Enter a network name','err');return}
+ $('btn').disabled=true;st('Connecting to '+s+'\u2026');
+ fetch('/api/wifi/connect',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:'ssid='+encodeURIComponent(s)+'&pass='+encodeURIComponent(p)})
+ .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d})})
+ .then(function(){if(poll)clearInterval(poll);poll=setInterval(function(){status().then(function(d){if(d.state!=='connecting'){clearInterval(poll);poll=null}}).catch(function(){})},1000)})
+ .catch(function(e){st('Error: '+e.message,'err');$('btn').disabled=false});
+}
+function rstat(){
+ get('/api/recovery/status').then(function(d){
+  var on=d.active&&d.via_ap;$('rec').hidden=!on;if(!on)return;
+  $('rs').textContent='active, '+d.clients+' client(s), '+Math.round(d.remaining_s/60)+' min left';
+  $('rtc').hidden=!d.token_set;$('rlg').hidden=!d.group;$('rbp').hidden=!d.other_slot;
+  if(d.other_slot)$('rbp').textContent='Boot previous firmware ('+d.other_slot+')';
+ }).catch(function(){});
+}
+function act(p,body,q){
+ if(!confirm(q))return;
+ var u=p==='wifi'?'/api/wifi/forget':'/api/recovery/'+p;
+ $('rst').textContent='working\u2026';$('rst').className='hint';
+ fetch(u,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})
+ .then(function(r){return r.json().then(function(d){if(!r.ok)throw new Error(d.error||('HTTP '+r.status));return d})})
+ .then(function(d){
+  if(d.token!==undefined){$('tokbox').hidden=!d.token;$('tok').textContent=d.token;$('rst').textContent=d.token?'Token replaced.':'Token removed.'}
+  else $('rst').textContent=d.message||(d.boot?'Restarting into '+d.boot+'\u2026':'Done.');
+  setTimeout(function(){status();rstat()},1500);
+ }).catch(function(e){$('rst').textContent='Error: '+e.message;$('rst').className='hint err'});
+}
+status().then(function(){scan(false)}).catch(function(e){$('cur').textContent='status unavailable ('+e.message+')';scan(false)});
+rstat();setInterval(rstat,30000);
+</script></body></html>

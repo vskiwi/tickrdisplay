@@ -1,0 +1,85 @@
+<!DOCTYPE html><html><head>
+<title>TickrDisplay Diagnostics</title>
+{{include:_head.html}}
+<style>
+.container{max-width:760px}
+h3{margin:18px 0 8px}
+.row{display:flex;align-items:center;gap:10px;margin-top:8px;flex-wrap:wrap}
+.row label{min-width:56px;font-weight:bold}
+input[type=range]{flex:1;min-width:120px}
+.r{color:var(--er)}.g{color:var(--ac)}.b{color:var(--bt)}
+.row select,.row input[type=text]{flex:1;min-width:0;padding:8px;border:1px solid var(--bd);border-radius:4px;background:var(--in);color:var(--fg);font-size:14px}
+.tbl{overflow-x:auto;scrollbar-width:thin;scrollbar-color:var(--bd) transparent}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{padding:6px 4px;border-bottom:1px solid var(--bd);text-align:left;white-space:nowrap}
+tr.run{background:var(--ab)}tr.boot td:first-child::after{content:" \25B6";color:var(--bt)}
+button.warn{background:#ff9800}
+button:disabled{opacity:.45;cursor:default}
+a{color:var(--ac)}a.sm{font-size:12px}
+.hint{font-size:12px;color:var(--mu);margin-top:6px}
+pre{font-size:11px;white-space:pre-wrap;word-break:break-all;max-height:320px;overflow:auto;background:var(--in);padding:8px;border-radius:4px;margin:8px 0 0}
+#msg{font-weight:bold;min-height:1.2em;font-size:13px}
+</style>
+<script>{{include:_auth.js}}</script>
+<script>
+function $(i){return document.getElementById(i)}
+function msg(t,c){$('msg').textContent=t;$('msg').className=c||''}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return'&#'+c.charCodeAt(0)+';'})}
+function hex(n){return'0x'+n.toString(16).toUpperCase()}
+function kb(n){return(n/1024).toFixed(0)+' KB'}
+// hardware test endpoints (POST /api/test/*, each only enqueues a command)
+function api(p){return fetch('/api/test/'+p,{method:'POST',headers:hdr()}).then(function(r){if(r.status==401)on401();return r.json().then(function(j){msg(p.split('?')[0]+': '+(r.ok?j.status:j.error||r.status),r.ok?'':'err')})}).catch(function(e){msg('Error: '+e.message,'err')})}
+function led(c){api('led_'+c+'_pwm?val='+($('c_'+c).checked?$('v_'+c).value:0))}
+function play(){var m=$('mel').value||$('rt').value.trim();if(!m){msg('Pick a melody or type an RTTTL string','err');return}api('play_rtttl?melody='+encodeURIComponent(m))}
+function load(){fetch('/api/system/info',{headers:hdr()}).then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()}).then(function(d){var tb=$('pt').tBodies[0];tb.innerHTML='';
+d.partitions.forEach(function(p){var tr=document.createElement('tr'),img='';tr.className=(p.running?'run':'')+(p.boot?' boot':'');
+if(p.type=='app')img=p.description?esc(p.description.project_name)+' '+esc(p.description.version)+'<br><small>'+esc(p.description.idf_ver)+' '+esc(p.description.date)+' '+esc(p.description.time)+'</small>':p.bootable?'<small>header ok, no description</small>':'<small>empty</small>';
+var act='<a class="sm" href="/api/system/partition/'+encodeURIComponent(p.label)+'">Download</a>';if(p.type=='app'&&!p.running&&p.bootable)act+=' <button class="sm warn w" onclick="boot(\''+esc(p.label)+'\')">Boot</button>';
+tr.innerHTML='<td>'+esc(p.label)+'</td><td>'+esc(p.type)+'/'+esc(p.subtype_str)+'</td><td>'+hex(p.address)+'</td><td>'+kb(p.size)+'</td><td>'+img+'</td><td>'+esc(p.ota_state||'')+'</td><td>'+act+'</td>';tb.appendChild(tr)});
+$('fl').href='/api/system/flash?offset=0&length='+d.flash.chip_size}).catch(function(e){msg('Failed to load /api/system/info: '+e.message,'err')})}
+function boot(l){if(!confirm('Set the boot partition to "'+l+'" and reboot?\n\nIf that slot holds the stock firmware you leave TickrDisplay (back: stock portal 192.168.4.1/update or recovery mode).'))return;
+fetch('/api/system/boot_partition',{method:'POST',headers:hdr({'Content-Type':'application/json'}),body:JSON.stringify({label:l})}).then(function(r){if(r.status==401)on401();return r.json()}).then(function(r){msg(r.ok?'Boot partition set to '+l+'. Rebooting\u2026':'Failed: '+r.error,r.ok?'':'err')}).catch(function(e){msg('Error: '+e,'err')})}
+function raw(u){$('raw').textContent='\u2026';fetch(u,{headers:hdr(),cache:'no-store'}).then(function(r){return r.text()}).then(function(t){try{t=JSON.stringify(JSON.parse(t),null,1)}catch(e){}$('raw').textContent=t}).catch(function(e){$('raw').textContent='Error: '+e.message})}
+// The page and every GET it shows are public; without a token the tests and Boot are greyed (_auth.js).
+// The partition downloads are plain links: on click the browser asks for the token once (Basic).
+function init(){load();if(!T)fetch('/api/status').then(function(r){return r.json()}).then(function(s){ro(s.auth_enabled)}).catch(function(){})}
+</script>
+</head>
+<body>
+<div class="container">
+{{include:_nav.html}}
+<h2>Diagnostics &amp; tests</h2>
+{{include:_tokbar.html}}
+<div id="msg"></div>
+<h3>LED &mdash; PWM per channel</h3>
+<div class="card w">
+  <div class="row"><input type="checkbox" id="c_red" onchange="led('red')"><label class="r">Red</label><input type="range" id="v_red" min="0" max="255" value="255" oninput="led('red')"></div>
+  <div class="row"><input type="checkbox" id="c_green" onchange="led('green')"><label class="g">Green</label><input type="range" id="v_green" min="0" max="255" value="255" oninput="led('green')"></div>
+  <div class="row"><input type="checkbox" id="c_blue" onchange="led('blue')"><label class="b">Blue</label><input type="range" id="v_blue" min="0" max="255" value="255" oninput="led('blue')"></div>
+  <div class="hint">Unticked = channel off.</div>
+</div>
+<h3>Sound</h3>
+<div class="card w">
+  <div class="row"><label>Volume</label><input type="range" id="vol" min="0" max="255" value="255" onchange="api('volume?val='+this.value)"></div>
+  <div class="row"><select id="mel">
+    <option value="Mario:d=4,o=5,b=100:32p,16e6,16e6,16p,16e6,16p,16c6,16e6,16p,16g6,8p,16g">Mario Theme</option>
+    <option value="Nokia:d=8,o=5,b=225:e6,d6,f#,g#,c#6,b,d,e,b,a,c#,e,2a">Nokia Tune</option>
+    <option value="">RTTTL below</option>
+  </select><button class="sm" onclick="play()">Play</button></div>
+  <div class="row"><input type="text" id="rt" maxlength="1024" placeholder="Name:d=4,o=5,b=100:c,e,g,2c6" spellcheck="false"></div>
+</div>
+<h3>Screen</h3>
+<div class="card"><div class="row"><button class="warn w" onclick="api('screen_refresh')">Refresh screen</button><button class="warn w" onclick="api('screen_pattern')">Test pattern</button><a class="sm" href="/api/screen.bmp" target="_blank">screen.bmp</a></div></div>
+<h3 id="parts">Partitions</h3>
+<div class="card">
+  <div class="tbl"><table id="pt"><thead><tr><th>Label</th><th>Type</th><th>Address</th><th>Size</th><th>Image</th><th>OTA state</th><th></th></tr></thead><tbody></tbody></table></div>
+  <div class="hint">&#9654; = boot partition, highlighted = running. <a id="fl" href="/api/system/flash">Full flash</a> &middot; <a href="/api/system/partition/coredump">coredump</a></div>
+</div>
+<h3>Raw JSON</h3>
+<div class="card">
+  <div class="row"><button class="sm" onclick="raw('/api/status')">status</button><button class="sm" onclick="raw('/api/system/info')">system/info</button><button class="sm" onclick="raw('/api/peers')">peers</button><button class="sm" onclick="raw('/api/screen/state')">screen/state</button></div>
+  <pre id="raw"></pre>
+</div>
+</div>
+<script>init();</script>
+</body></html>

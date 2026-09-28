@@ -1,0 +1,491 @@
+<!DOCTYPE html><html><head>
+<title>TickrDisplay</title>
+{{include:_head.html}}
+<style>
+.container{max-width:1200px}
+label{display:block;margin:10px 0 4px;color:var(--mu)}
+.card input[type=text],.card input[type=password],.card input[type=number],.card select{width:100%;padding:9px;border:1px solid var(--bd);border-radius:4px;box-sizing:border-box;font-size:15px;background:var(--in);color:var(--fg)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px}
+.row input[type=text]{width:auto;flex:1}
+button:disabled{opacity:.45;cursor:default}
+button.danger{background:#c62828}
+.hint{font-size:12px;color:var(--mu);margin-top:4px}
+#chk{font-size:28px;font-weight:bold;letter-spacing:4px;text-align:center;margin:10px 0}
+#code{font-size:24px;letter-spacing:6px;text-align:center}
+#log,#st{white-space:pre-wrap;font-family:monospace;font-size:12px;margin-top:8px}
+.ok{color:var(--ac)}
+#grid{display:grid;gap:8px;grid-template-columns:repeat(var(--n),var(--cw));overflow:auto;padding:4px 0}
+#grid.one{grid-template-columns:minmax(0,640px);justify-content:center}#grid.one .cell{border:0;min-height:0}
+.cell{min-height:48px;border:1px dashed var(--bd);border-radius:6px}
+.cell.over{border-color:var(--ac);background:var(--ab)}
+.tile{position:relative;background:var(--c2);border:2px solid var(--bd);border-radius:6px;padding:5px;touch-action:none;user-select:-webkit-user-select;user-select:none;cursor:pointer;outline:0}
+.tile:hover,.tile:focus{border-color:var(--bt)}
+.tile.self{border-color:var(--ac)}
+.tile.tmp{border-style:dashed}
+.tile.drag{z-index:9;pointer-events:none;opacity:.85}
+.tile.mv{border-color:var(--bt);box-shadow:0 0 0 3px var(--bt)}#grid.mv .cell{border-color:var(--bt);cursor:pointer}
+.dev{display:flex;gap:3px}
+.dev canvas{flex:1;min-width:0;display:block;background:#fff;border:1px solid #888;image-rendering:pixelated;box-sizing:border-box}
+.led{width:9%;border-radius:3px;background:var(--bd);border:1px solid #888;box-sizing:border-box}
+.tile.off canvas,.tile.sleep canvas{opacity:.4}
+/* name row: name (ellipsis first) + badges on the same 18 px line, right-aligned, clipped at 70 % - the card height never changes */
+.tile .nm{display:flex;align-items:center;gap:4px;font-weight:bold;font-size:14px;line-height:18px;margin:4px 0 2px}
+.nm>span:first-child{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bds{display:flex;flex-shrink:0;max-width:70%;overflow:hidden;font-weight:normal}
+.num{position:absolute;left:12px;top:12px;padding:0 14px;font:bold 44px Arial,sans-serif;color:#fff;background:rgba(0,0,0,.65);border-radius:8px;pointer-events:none}
+.bd{font-size:11px;line-height:14px;padding:1px 5px;border-radius:3px;background:var(--bd);white-space:nowrap;margin-right:3px}
+.b-off{background:var(--er);color:#fff}.b-pair{background:#ff9800;color:#fff}.b-sleep{background:#607d8b;color:#fff}.b-ok{background:var(--ab);color:var(--ac)}
+/* state colours: the card's LED bar and the state word in the device sheet's header share them */
+.s-offline{background:var(--mu);opacity:.5;border-style:dashed}.s-asleep{background:#607d8b;color:#fff}.s-stale{background:#ff9800;opacity:.6}.hd .s-offline,.hd .s-stale{opacity:1;color:#fff}
+/* device sheet (#menu) and Content editor (#ce), docs/WEB_UI.md "Device sheet contents": desktop = a panel docked to the right, full height, own scroll */
+#menu,#ce{position:fixed;top:0;right:0;bottom:0;width:340px;max-width:100%;margin:0;overflow:auto;box-sizing:border-box;z-index:20;border-radius:0;border-left:1px solid var(--bd);box-shadow:-4px 0 12px rgba(0,0,0,.3);animation:in .2s}
+#menu .row{margin-top:6px}#menu input[type=range],#ce input[type=range]{flex:1;min-width:60px}#menu a,#ce a{color:var(--ac)}
+.hd{display:flex;align-items:center;gap:6px}.hd b{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px}
+.x{background:none;color:var(--mu);font-size:22px;line-height:1;padding:0 6px}.x:hover{background:none;color:var(--fg)}
+#menu h4{margin:12px 0 4px;padding-bottom:3px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--mu);border-bottom:1px solid var(--bd)}
+.kv{display:grid;grid-template-columns:auto 1fr auto 1fr;gap:3px 8px;font-size:12px;word-break:break-word}.kv span:nth-child(odd){color:var(--mu)}
+.t1{flex:1;min-width:0;font-size:13px}#menu summary{cursor:pointer;color:var(--bt);font-size:12px;margin-top:6px}
+@keyframes in{from{transform:translateX(100%)}}
+#ce pre{font-size:11px;white-space:pre-wrap;word-break:break-all;user-select:all}
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:10px}.bar h2{flex:1;margin:0;border:0;padding:0}
+.near{display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px 0;border-bottom:1px solid var(--bd)}
+.near:last-child{border:0}
+#prot:not([hidden]){display:flex;gap:8px;align-items:center;flex-wrap:wrap;border:1px solid var(--bt)}#prot .t{flex:1;min-width:200px}
+#tk{font:bold 16px monospace;word-break:break-all;user-select:all;margin:6px 0}
+#menu:focus,#ce:focus{outline:0}#bk{display:none}
+@keyframes up{from{transform:translateY(100%)}}
+/* Mobile (docs/WEB_UI.md "Phone layout"): one column in shelf order, the device menu and the Content editor */
+/* as bottom sheets over a backdrop (#bk), 44 px touch targets. The desktop rules above are untouched. */
+@media (max-width:480px){
+body{padding:6px}.container{padding:12px}
+.nav{gap:8px}.nav a{padding:12px 14px;line-height:20px}#th{min-height:44px;padding:8px 6px}.bar{flex-wrap:wrap}
+button{min-height:44px;min-width:44px}button.sm{font-size:14px;padding:0 12px}
+#tokbar input,#tok,#ip,#menu input,#ce input:not([type=checkbox]),#ce select{min-height:44px}#ce input[type=checkbox]{width:22px;height:22px;margin:0 4px}
+#grid{grid-template-columns:minmax(0,1fr);overflow:visible}#grid .cell{border:0;min-height:0}.cell:empty,.z{display:none}
+.tile{touch-action:pan-y;-webkit-touch-callout:none}
+#menu,#ce{left:0;top:auto;width:auto;max-height:85vh;overscroll-behavior:contain;border-left:0;border-radius:14px 14px 0 0;padding:24px 15px calc(15px + env(safe-area-inset-bottom));box-shadow:0 -4px 16px rgba(0,0,0,.35);animation:up .2s}
+#menu:before,#ce:before{content:'';position:absolute;top:8px;left:50%;width:40px;height:4px;margin-left:-20px;border-radius:2px;background:var(--mu)}
+#menu .row>button,#ce .row>button{flex:1 1 auto}#menu .row.w>button{flex:0 0 auto}#menu summary,#menu .row>a{padding:12px 0;line-height:20px}
+#bk.on{display:block;position:fixed;top:0;left:0;right:0;bottom:0;z-index:19;background:rgba(0,0,0,.45);touch-action:none}
+html.lk,body.lk{overflow:hidden}
+}
+</style>
+<script>{{include:_crypto.js}}</script>
+<script>{{include:_auth.js}}</script>
+<script>
+function $(i){return document.getElementById(i)}
+// ---- state (T, hdr, ro, on401, tokSave: _auth.js) --------------------------
+var HOST=(location.search.match(/[?&]host=([^&]+)/)||[])[1]||location.host,HB='http://'+HOST;
+var me=null,peers=[],W=null,D={},L=null,CW=200,inflight=0,lastStart=0,saveT=0,MQ=matchMedia('(max-width:480px)');
+// ---- mobile bottom sheets (docs/WEB_UI.md "Phone layout"): #menu / #ce become sheets by CSS alone; here only the backdrop (#bk, a tap
+// on it closes), the page scroll lock (.lk) and focus into the sheet. Esc and Close work as on the desktop.
+function sheet(el){var on=!!(M||C);$('bk').classList.toggle('on',on);document.documentElement.classList.toggle('lk',on);document.body.classList.toggle('lk',on);if(on&&el&&MQ.matches)el.focus()}
+function req(b,p,m,f,j){var o={method:m||'GET',headers:hdr()};if(f){o.headers['Content-Type']='application/x-www-form-urlencoded';o.body=new URLSearchParams(f).toString()}
+if(j){o.headers['Content-Type']='application/json';o.body=JSON.stringify(j)}
+// A 401 from the HOST (this page's device, by either address) opens the token bar + read-only mode
+// once (_auth.js on401); 401s from other devices stay a badge (their token is the per-device override).
+return fetch((b||HB)+p,o).then(function(r){return r.text().then(function(t){var x={};try{x=JSON.parse(t)}catch(e){x._t=t}x._s=r.status;if(r.status==401&&(!b||b==HB||me&&b==base(me)))on401();return x})})}
+function wait(ms){return new Promise(function(r){setTimeout(r,ms)})}
+function log(s,c){var d=document.createElement('div');if(c)d.className=c;d.textContent=s;$('log').appendChild(d)}
+function st(s,c){$('st').textContent=s;$('st').className=c||''}
+function base(d){return d?'http://'+d.ip:''}
+function hhmm(ms){var d=new Date(ms);return('0'+d.getHours()).slice(-2)+':'+('0'+d.getMinutes()).slice(-2)}
+function hx(v){return('0'+v.toString(16)).slice(-2)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return'&#'+c.charCodeAt(0)+';'})}
+function dur(s){return s<3600?Math.floor(s/60)+' min':s<86400?(s/3600).toFixed(1)+' h':(s/86400).toFixed(1)+' d'}
+// ---- device records ------------------------------------------------------
+function dev(id){return D[id]||(D[id]={id:id,x:0,y:0,fails:0,next:0,idAt:0,ledAt:0})}
+function fromPeer(p){var d=dev(p.id);if(!d.idAt)d.name=p.name;d.ip=p.ip;d.mac=p.mac;d.power=p.power;d.member=p.member;d.stale=p.stale;d.seen=p.last_seen_s;d.wake=p.next_wake_s;d.rssi=p.rssi;d.seenAt=p.stale?d.seenAt:Date.now()-(p.last_seen_s||0)*1000;d.gone=false;return d}
+function fromIdent(d,i){d.name=i.name;d.ip=i.ip;d.mac=i.mac;d.power=i.power;d.ver=i.version;d.x=i.layout.x;d.y=i.layout.y;d.grp=i.group;d.relay=!!i.relay;d.idAt=Date.now();d.tmp=false}
+function inGrid(d){return d.self||d.member}
+function sleeping(d){return !d.self&&d.power=='battery'&&(d.stale||d.seen==null||d.seen>20)}
+// LED-bar state (docs/WEB_UI.md "Card states and badges"): '' = online, the bar mirrors the real LED (off -> neutral);
+// offline / asleep override it (the LED is unknown); stale (peer beacon missed, or no answer for 2 min) only while the LED is off.
+function bst(d){return d.st=='sleep'?'asleep':d.st=='off'||d.gone&&!d.self?'offline':!d.led&&(d.stale&&!d.self||d.okAt&&Date.now()-d.okAt>120000)?'stale':''}
+// ---- persistence (localStorage: frames + identities only, never secrets) --
+function cacheLoad(){try{var c=JSON.parse(localStorage.tickr_panel||'{}').devs||{},k;for(k in c){var d=dev(k),e=c[k];d.name=e.name;d.ip=e.ip;d.mac=e.mac;d.x=e.x;d.y=e.y;d.power=e.power;d.member=e.member;d.seenAt=e.seenAt;d.led=e.led;d.cached=true;d.gone=true;
+if(e.frame){d.frame=TC.unb64(e.frame);d.frameAt=e.frameAt}}}catch(e){}}
+function cacheSave(){clearTimeout(saveT);saveT=setTimeout(function(){var o={},k;for(k in D){var d=D[k];if(!d.ip)continue;o[k]={name:d.name,ip:d.ip,mac:d.mac,x:d.x,y:d.y,power:d.power,member:d.member,seenAt:d.seenAt,led:d.led,frameAt:d.frameAt,frame:d.frame?TC.b64(d.frame):null}}
+try{localStorage.tickr_panel=JSON.stringify({devs:o})}catch(e){}},1500)}
+// ---- frame rendering (docs/API.md "Screen": 37 B/row, MSB first, 1 = black)
+function draw(d){if(!d.cv||!d.frame)return;var ctx=d.cv.getContext('2d'),im=ctx.createImageData(296,128),p=im.data,f=d.frame,x,y,i,v;
+for(y=0;y<128;y++)for(x=0;x<296;x++){v=f[y*37+(x>>3)]>>(7-(x&7))&1?0:255;i=(y*296+x)*4;p[i]=p[i+1]=p[i+2]=v;p[i+3]=255}ctx.putImageData(im,0,0)}
+// ---- polling scheduler (docs/MULTI_DEVICE.md "The shelf layout": <= 6 in flight, <= 4 req/s, paused when hidden)
+var Q=[],tk=0;
+function enqueue(d,kind){var i;for(i=0;i<Q.length;i++)if(Q[i].d==d&&Q[i].k==kind)return;Q.push({d:d,k:kind})}
+function tick(){var now=Date.now(),k,n=0;for(k in D)if(inGrid(D[k]))n++;
+if(document.hidden)return;
+if(++tk%8==0)paint();
+for(k in D){var d=D[k];if(!d.ip||!inGrid(d)||d.gone&&!d.self)continue;
+if(sleeping(d)){d.st='sleep';continue}
+if(d.next<=now){d.next=now+Math.max(10000,n*400)*(d.st=='off'?3:1);enqueue(d,'frame');if(now-d.idAt>60000)enqueue(d,'ident');if(now-d.ledAt>30000)enqueue(d,'led')}}
+while(Q.length&&inflight<6&&now-lastStart>=250){var j=Q.shift();lastStart=now;inflight++;(j.k=='frame'?pollFrame(j.d):j.k=='led'?pollLed(j.d):pollIdent(j.d)).catch(function(){}).then(function(){inflight--})}}
+function ctl(){var c=new AbortController();setTimeout(function(){c.abort()},6000);return c.signal}
+function pollFrame(d){var h=hdr();if(d.etag)h['If-None-Match']=d.etag;
+return fetch(base(d)+'/api/screen/raw',{headers:h,signal:ctl()}).then(function(r){d.fails=0;if(r.status==200||r.status==304)d.okAt=Date.now();
+if(r.status==304){d.st='ok';return}
+// a new frame: re-read status + screen state at once (LED colour and state badge follow the content)
+if(r.status==200)return r.arrayBuffer().then(function(b){if(b.byteLength!=4736)throw 0;d.frame=new Uint8Array(b);d.frameAt=Date.now();d.cached=false;d.etag=r.headers.get('ETag');d.st='ok';d.ledAt=0;draw(d);cacheSave()});
+if(r.status==401){d.st='auth';return}
+if(r.status==503)return r.text().then(function(t){d.st=/pairing/.test(t)?'pair':'busy';d.next=Date.now()+5000});
+d.st='err'}).catch(function(){if(++d.fails>=2)d.st='off';else d.next=Date.now()+3000})}
+function pollIdent(d){return fetch(base(d)+'/api/identity',{signal:ctl()}).then(function(r){return r.json()}).then(function(i){if(i.id==d.id)fromIdent(d,i);cacheSave()}).catch(function(){})}
+// /api/status every 30 s: the real LED colour (three PWM values) -> the card's LED bar (off = neutral),
+// the rest (power, uptime, MQTT, last error) -> the device menu; on the host it also decides the Protect card
+// and, without a token in this browser, the read-only mode (_auth.js). Then GET /api/screen/state: its "state"
+// (boot|setup|waiting|content|pairing|recovery|ota|identify; absent on older firmware) -> tile badge unless content.
+function pollLed(d){d.ledAt=Date.now();return fetch(base(d)+'/api/status',{headers:hdr(),signal:ctl()}).then(function(r){return r.json()}).then(function(j){if(d.self){protShow(j.auth_enabled===false);if(!T)ro(j.auth_enabled)}var l=j.led;if(l){d.si=j;d.led=l.r|l.g|l.b?'#'+hx(l.r)+hx(l.g)+hx(l.b):null}
+return fetch(base(d)+'/api/screen/state',{headers:hdr(),signal:ctl()})}).then(function(r){return r.json()}).then(function(j){d.ss=j;d.sst=j.state}).catch(function(){}).then(function(){cacheSave();paint()})}
+// ---- presence: host identity + peer table, layout documents (docs/MULTI_DEVICE.md "The shelf layout") ---------
+function refresh(){return req(HB,'/api/identity').then(function(i){if(!i.id)throw new Error('host /api/identity failed');me=i;var d=dev(i.id);fromIdent(d,i);d.self=true;d.member=true;d.gone=false;d.seenAt=Date.now();
+$('me').textContent=i.name+' ('+i.id+') '+(i.pairable?'':'- on battery, cannot pair');
+$('grp').textContent=i.group?i.group.name+' (id '+i.group.id+', epoch '+i.group.epoch+')':'none';
+$('leave').disabled=$('rekey').disabled=!i.group;
+return req(HB,'/api/peers')}).then(function(p){var k,seen={};peers=p._s==200?p:[];
+for(k=0;k<peers.length;k++)seen[fromPeer(peers[k]).id]=1;
+for(k in D)if(!seen[k]&&!D[k].self)D[k].gone=true;
+fill();loadLayouts();pollRelay();paint()}).catch(function(e){st('Error: '+e.message,'err')})}
+function loadLayouts(){var k,ps=[];for(k in D){var d=D[k];if(d.ip&&inGrid(d)&&!d.gone&&d.power=='usb')ps.push(req(base(d),'/api/layout').then(function(j){if(j._s==200&&j.v==1&&(!L||j.updated_at>L.updated_at))L=j}).catch(function(){}))}
+Promise.all(ps).then(function(){if(!L)return;var id;if(L.groups)GR=L.groups;for(id in L.devices){var e=L.devices[id],d=D[id];if(d&&!d.idAt){d.x=e.x;d.y=e.y;if(e.name&&!d.name)d.name=e.name;d.tmp=false}}paint()})}
+// ---- relay for sleepers (docs/MULTI_DEVICE.md "Relay for sleeping members"): a USB member parks payloads / OTA jobs per id.
+// relayOf() = this device when it is a relay, else the first online USB member that is; RL = what it holds
+// (GET /api/relay every presence refresh) -> one "pending" badge on the sleeper's card (the sheet's Status row lists the kinds).
+var RL={payload:[],ota:[]},GR={};
+function relayOf(){var m=me&&D[me.id],k;if(m&&m.relay)return m;for(k in D){var d=D[k];if(d.relay&&inGrid(d)&&d.st=='ok'&&d.power=='usb')return d}return null}
+function pollRelay(){var r=relayOf();if(!r||!T)return;req(base(r),'/api/relay').then(function(j){if(j._s==200){RL=j;paint()}}).catch(function(){})}
+function pend(d,k){return RL[k].indexOf(d.id)>=0}
+function clearPending(){var d=M,r=relayOf();closeMenu();if(!r)return;Promise.all([pend(d,'payload')?req(base(r),'/api/relay/'+d.id,'DELETE'):0,pend(d,'ota')?req(base(r),'/api/relay/'+d.id+'/ota','DELETE'):0]).then(function(){st('Pending items for '+d.name+' cleared.','ok');pollRelay()})}
+// bounded-concurrency fan-out (<= 6 in flight); fn returns a promise, results keep the item order
+function pool(items,fn){var i=0,r=[];function next(){if(i>=items.length)return Promise.resolve();var k=i++;return fn(items[k],k).then(function(v){r[k]=v},function(e){r[k]='Error: '+e.message}).then(next)}
+var ws=[],j;for(j=0;j<6;j++)ws.push(next());return Promise.all(ws).then(function(){return r})}
+// ---- layout grid ---------------------------------------------------------
+function place(){var k,used={},mx=1,my=0,list=[];for(k in D)if(inGrid(D[k])&&D[k].ip)list.push(D[k]);
+// stable priority on a slot clash: devices with a fresh identity, then this device, then by id
+list.sort(function(a,b){return(a.idAt?0:1)-(b.idAt?0:1)||(a.self?0:1)-(b.self?0:1)||(a.id<b.id?-1:1)});
+list.forEach(function(d){var c=d.x+','+d.y;if(used[c]){var x=0,y=0;while(used[x+','+y]){x++;if(x>15){x=0;y++}}d.x=x;d.y=y;d.tmp=true}used[d.x+','+d.y]=d;if(d.x>mx)mx=d.x;if(d.y>my)my=d.y});
+// one device = one large card and no layout grid (docs/WEB_UI.md "Pages and navigation")
+var one=list.length==1;return{list:list,one:one,cols:one?1:Math.min(16,mx+2),rows:one?1:Math.min(16,my+2)}}
+// The card mirrors the device: e-ink canvas + the LED bar on the right. The whole card is one button: a click
+// (or Enter/Space on the focused card) opens its menu, a drag (pdown/pmove/pup) arranges the shelf.
+function tile(d){if(d.el)return d.el;var e=document.createElement('div');e.className='tile';e.dataset.id=d.id;e.tabIndex=0;e.setAttribute('role','button');e.setAttribute('aria-haspopup','dialog');
+e.innerHTML='<div class="dev"><canvas width="296" height="128"></canvas><div class="led"></div></div><div class="nm"><span></span><span class="bds"></span></div><div class="num" hidden></div>';
+d.el=e;d.cv=e.firstChild.firstChild;e.addEventListener('pointerdown',pdown);e.addEventListener('keydown',keys);e.addEventListener('click',tclick);draw(d);return e}
+// one 200 px card fits ~130 px of badges: "asleep" implies battery (no second badge) and carries the next wake as "~hh:mm"
+function badges(d){var b=[],now=Date.now();if(d.self)b.push(['this device','b-ok']);if(d.power=='battery'&&d.st!='sleep')b.push(['battery','']);
+if(d.st=='sleep')b.push(['asleep'+(d.wake?' ~'+hhmm(now+d.wake*1000):''),'b-sleep']);
+else if(d.st=='off'||d.gone&&!d.self)b.push(['offline'+(d.seenAt?' - seen '+hhmm(d.seenAt):''),'b-off']);
+else if(d.st=='pair')b.push(['pairing...','b-pair']);else if(d.st=='auth')b.push(['401 - token?','b-off']);else if(d.st=='busy'||d.st=='err')b.push([d.st,'b-pair']);
+else if(d.sst&&d.sst!='content')b.push([{setup:'set-up',ota:'updating'}[d.sst]||d.sst,'b-pair']);
+if(d.up!=null)b.push(['flashing '+d.up+' %','b-pair']);if(pend(d,'payload')||pend(d,'ota'))b.push(['pending','b-sleep']);
+if(d.stale&&!d.self)b.push(['stale','']);if(d.cached&&d.frame)b.push(['cached '+hhmm(d.frameAt),'']);if(d.tmp)b.push(['position not saved','b-pair']);
+return b}
+function paint(){var P=place(),g=$('grid'),cells={},x,y;g.style.setProperty('--n',P.cols);g.style.setProperty('--cw',CW+'px');g.classList.toggle('mv',!!MV);g.classList.toggle('one',P.one);
+while(g.childNodes.length>P.cols*P.rows)g.removeChild(g.lastChild);
+for(y=0;y<P.rows;y++)for(x=0;x<P.cols;x++){var i=y*P.cols+x,c=g.childNodes[i],cx=P.one?P.list[0].x:x,cy=P.one?P.list[0].y:y;if(!c){c=document.createElement('div');c.className='cell';g.appendChild(c)}c.dataset.x=cx;c.dataset.y=cy;cells[cx+','+cy]=c}
+P.list.forEach(function(d){var e=tile(d),c=cells[d.x+','+d.y];if(e.parentNode!=c)c.appendChild(e);
+e.className='tile'+(d.self?' self':'')+(d.tmp?' tmp':'')+(d.st=='off'||d.gone&&!d.self?' off':'')+(d.st=='sleep'?' sleep':'')+(d==MV?' mv':'');
+var l=e.firstChild.lastChild,s=bst(d),n=e.children[1];l.className='led'+(s?' s-'+s:'');l.style.background=s?'':d.led||'';l.title=s||(d.led?'LED '+d.led:'LED off');
+n.firstChild.textContent=d.name||d.id;n.title=d.id+' '+d.ip;
+n.lastChild.innerHTML=badges(d).map(function(b){return'<span class="bd '+b[1]+'">'+b[0]+'</span>'}).join('');
+e.children[2].hidden=!d.num;e.children[2].textContent=d.num||''});
+// nearby: not in the host's group (rebuilt only when it changed, so its buttons stay clickable)
+var n=$('near'),h='',k;for(k in D){var d=D[k];if(inGrid(d)||d.gone||!d.ip)continue;
+h+='<div class="near"><b>'+d.name+'</b><span class="bd">'+d.ip+'</span>'+(d.power!='usb'?'<span class="bd">battery</span>':'')+(d.stale?'<span class="bd">stale</span>':'')+
+'<button class="sm w" onclick="pairWith(\''+k+'\')"'+(d.power!='usb'?' disabled title="on battery, cannot pair"':'')+'>Pair</button><button class="sm danger w" onclick="forgetId(\''+k+'\')">Forget</button></div>'}
+h=h||'<div class="hint">No unpaired TickrDisplays heard on the LAN.</div>';if(n.dataset.h!=h){n.dataset.h=h;n.innerHTML=h}}
+function zoom(v){CW=+v;paint()}
+// ---- drag and drop (pointer events: mouse, touch, pen) ---------------------
+var G=null,DG=0;
+// Click vs drag: pointer down and up within 6 px and 300 ms = a click (the card's click handler opens the menu);
+// anything longer or farther is a drag (read-only mode: no drag) and DG makes the click that follows a no-op.
+// Mobile (docs/WEB_UI.md "Phone layout"): the tile has touch-action: pan-y, so a vertical swipe scrolls the one-column shelf (the browser
+// cancels the pointer), a sideways drag still drags; Move in the menu is the primary path there.
+function pdown(e){var el=e.currentTarget;DG=0;G={el:el,x:e.clientX,y:e.clientY,t:Date.now(),on:false};el.setPointerCapture(e.pointerId);el.addEventListener('pointermove',pmove);el.addEventListener('pointerup',pup);el.addEventListener('pointercancel',pup)}
+function under(e){var c=document.elementFromPoint(e.clientX,e.clientY);return c&&c.closest('.cell')}
+function pmove(e){if(!G)return;var dx=e.clientX-G.x,dy=e.clientY-G.y;if(!G.on&&Math.abs(dx)+Math.abs(dy)<6)return;G.on=true;if(RO)return;G.el.classList.add('drag');G.el.style.transform='translate('+dx+'px,'+dy+'px)';
+var c=under(e),o=document.querySelector('.cell.over');if(o&&o!=c)o.classList.remove('over');if(c)c.classList.add('over')}
+function pup(e){if(!G)return;var el=G.el,c=G.on&&!RO&&under(e);el.classList.remove('drag');el.style.transform='';el.removeEventListener('pointermove',pmove);el.removeEventListener('pointerup',pup);el.removeEventListener('pointercancel',pup);
+var o=document.querySelector('.cell.over');if(o)o.classList.remove('over');if(G.on||Date.now()-G.t>300)DG=1;G=null;if(c){MV=null;moveTo(D[el.dataset.id],+c.dataset.x,+c.dataset.y)}}
+// A click on the card = its menu (toggles on the same card); while Move is armed the click is left to gridClick().
+function tclick(e){if(DG||MV)return;e.stopPropagation();openMenu(D[this.dataset.id])}
+// Move from the menu (touch alternative to dragging): the card is marked, a tap on another card or an
+// empty slot moves/swaps it through moveTo(); a tap on itself or Esc cancels.
+var MV=null;
+function moveStart(){MV=M;closeMenu();paint();st('Move '+MV.name+': tap another screen or an empty slot (Esc cancels)')}
+function moveEnd(){MV=null;st('');paint()}
+function gridClick(e){var c=e.target.closest('.cell'),d=MV;if(!d||!c)return;moveEnd();moveTo(d,+c.dataset.x,+c.dataset.y)}
+// keyboard: Enter/Space on a focused tile = its menu; arrow keys = the alternative to dragging
+function keys(e){var el=e.currentTarget,d=D[el.dataset.id],k={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]}[e.key];
+if(e.key=='Enter'||e.key==' '){e.preventDefault();openMenu(d);return}if(!k||RO)return;e.preventDefault();moveTo(d,d.x+k[0],d.y+k[1])}
+function moveTo(d,x,y){if(x<0||y<0||x>15||y>15||(x==d.x&&y==d.y&&!d.tmp))return;var k,ch=[d],o=null;for(k in D)if(D[k]!=d&&inGrid(D[k])&&D[k].ip&&D[k].x==x&&D[k].y==y)o=D[k];
+if(o){o.x=d.x;o.y=d.y;o.tmp=false;ch.push(o)}d.x=x;d.y=y;d.tmp=false;paint();saveLayout(ch)}
+// ---- device sheet (docs/WEB_UI.md "Device sheet contents"): a click on the card opens the device's page as a sheet - header
+// (name + state word, state colours), Status (labelled pairs), Showing (what the screen shows; Change... = the Content
+// editor as the second step), Actions (Identify, Rename, Move, Clear pending; LED/sound as a "test" disclosure),
+// Device (Open device page, Forget - offline/stale only, never this device). A second click on the same card closes
+// it; a click on another card replaces the content. Desktop: a panel docked to the right; mobile: the bottom sheet.
+var M=null,SN={mqtt:'MQTT',url:'URL',text:'Text',ticker:'Ticker'};
+function srcOf(c){return c.source_kind=='ticker'?'ticker':c.mqtt_server?'mqtt':c.pull_url?'url':'text'}
+function kv(a){var h='',i;for(i=0;i<a.length;i+=2)if(a[i+1]!=null)h+='<span>'+a[i]+'</span><span>'+a[i+1]+'</span>';return h}
+function openMenu(d){if(M==d){closeMenu();return}var m=$('menu'),s=d.si||{},b=bst(d),ss=d.ss,pp=pend(d,'payload'),po=pend(d,'ota'),fg=(b=='offline'||b=='stale')&&!d.self,r=d.rssi||s.rssi;M=d;ceClose();
+m.innerHTML='<div class="hd"><b>'+esc(d.name)+'</b><span class="bd s-'+(b||'online')+'">'+(b||'online')+'</span>'+(d.self?'<span class="bd b-ok">this device</span>':'')+'<button class="x" onclick="closeMenu()" title="Close">&times;</button></div>'+
+'<h4>Status</h4><div class="kv">'+kv(['Address',d.ip,'Power',(d.power||'?')+(s.vsys_v!=null?' '+(+s.vsys_v).toFixed(2)+' V':''),'Signal',r?r+' dBm':null,'Firmware',d.ver?'v'+d.ver:null,'Uptime',s.uptime_s!=null?dur(s.uptime_s):null,'MQTT',s.mqtt_enabled==null?null:s.mqtt_enabled?(s.mqtt_connected?'connected':'disconnected'):'off',
+'Relay',d.idAt?(d.relay?'yes':'no'):null,'Pending',pp||po?(pp?'content':'')+(pp&&po?', ':'')+(po?'update':''):null,'Token',s.auth_enabled===false?'<span class="err">none</span>':null,'Error',s.last_error?'<span class="err">'+esc(s.last_error)+'</span>':null])+'</div>'+
+'<h4>Showing</h4><div class="row"><span class="t1">'+(ss?ss.state&&ss.state!='content'?ss.state:(d.cfg?SN[srcOf(d.cfg)]+' &middot; ':'')+esc(ss.title)+(ss.value?' / '+esc(ss.value):''):b||'&hellip;')+'</span><button class="sm w" onclick="content()">Change&hellip;</button></div>'+
+'<h4>Actions</h4><div class="row">'+(b&&b!='stale'?'':'<button class="sm w" onclick="identOne()" title="This device shows its shelf number for 30 s">'+(d.num?'Stop identify':'Identify this')+'</button>')+'<button class="sm w" onclick="rename()">Rename</button><button class="sm w" onclick="moveStart()" title="Then tap the destination">Move</button>'+(pp||po?'<button class="sm w" onclick="clearPending()" title="Forget what the relay holds for this device">Clear pending</button>':'')+'</div>'+
+(b&&b!='stale'?'':'<details><summary>Test LED &amp; sound</summary><div class="hint">A test only - nothing is saved, the next payload sets them again.</div>'+
+'<div class="row w"><span class="hint">LED</span><input type="color" id="mc" value="'+(d.pick||d.led||'#ffffff')+'" onchange="led()"><input type="range" id="mb" min="0" max="255" value="'+(d.bri==null?255:d.bri)+'" onchange="led()"><button class="sm" onclick="led(1)">Off</button></div>'+
+'<div class="row w"><span class="hint">Sound</span><input type="range" id="mv" min="0" max="255" value="'+(d.vol==null?255:d.vol)+'" onchange="vol()"><button class="sm" onclick="beep()">Beep</button></div></details>')+
+(RO?'<div class="hint">Read-only - enter the API token in the bar above to control devices.</div>':'')+
+(d.self&&!fg?'':'<h4>Device</h4><div class="row">'+(d.self?'':'<a target="_blank" href="'+base(d)+'/">Open device page &#8599;</a>')+(fg?'<button class="sm danger w" onclick="forgetId(\''+d.id+'\')">Forget</button>':'')+'</div>');
+m.hidden=false;m.scrollTop=0;sheet(m)}
+function closeMenu(){$('menu').hidden=true;M=null;sheet()}
+// LED / sound through the dashboard's test endpoints (no new API): colour x brightness -> three PWM values.
+function test(d,p){return req(base(d),'/api/test/'+p,'POST').then(function(j){if(j._s!=202)st('Error: '+(j.error||j._s),'err')}).catch(function(e){st('Error: '+e.message,'err')})}
+function led(off){var d=M,c=$('mc').value,b=+$('mb').value,v=[1,3,5].map(function(i){return off?0:Math.round(parseInt(c.substr(i,2),16)*b/255)});
+['red','green','blue'].forEach(function(ch,i){test(d,'led_'+ch+'_pwm?val='+v[i])});d.pick=c;d.bri=b;d.led=off?null:'#'+v.map(hx).join('');d.ledAt=Date.now()-27000;paint();cacheSave()}
+function vol(){M.vol=+$('mv').value;test(M,'volume?val='+M.vol)}
+function beep(){test(M,'beep')}
+// ---- Content editor (docs/WEB_UI.md "Change what a device shows"): what one device shows, as a sheet over the shelf.
+// Sources: Text (title/value + Reactions: LED colour, sound, volume -> POST /api/screen to that device, at once),
+// Custom JSON URL (= that device's Pull URL + interval: POST /config with only those two fields, pre-filled from
+// its /api/config), MQTT (broker/topic read-only + link to its /system#content), Push only (curl line).
+// The selector opens on the source the device uses now (source_kind ticker -> Ticker, mqtt_server -> MQTT, pull_url -> URL, else Text).
+// Ticker (docs/TICKERS.md "Setting it up in the web UI"): market preset (PR: name, example symbol / market, hint) or Custom (URL + JSONPath-lite
+// paths), symbol, market, refresh; Test = POST /api/source/test on that device (one fetch, nothing saved - browsers cannot
+// reach the exchanges because of CORS); Save = POST /config with source_kind=ticker and the tk_* fields only. Advanced:
+// label, decimals, separator. Choosing Text or URL afterwards writes source_kind too, so the ticker stops fetching.
+// A device not yet on a ticker gets "Every 5 minutes" pre-filled (the 1-min floor stays, docs/TICKERS.md "Presets"; the
+// e-ink refreshes partially between forced fulls, so the interval is about the exchange, not the flashing).
+var PR={coingecko:['CoinGecko','bitcoin','usd','coin id + currency (bitcoin, ethereum, solana / usd, eur); ~10 requests per minute'],
+kraken:['Kraken','XBT','USD','pair = symbol + market (XBT USD, ETH EUR); the 24 h change is computed from the open'],
+binance:['Binance','BTC','USDT','symbol + market (BTC USDT, ETH BTC); 6 000 requests per minute, geo-blocked in some countries'],
+custom:['Custom JSON','','','any JSON API: {s} / {m} in the URL are replaced by symbol / market; paths like $.data[0].last or result.*.c[0] (* = first key)']};
+function tkf(t){var s=$('tp').value,f={tk_preset:s,tk_symbol:$('ts').value.trim(),tk_market:$('tm').value.trim(),tk_label:$('tl').value.trim(),tk_decimals:$('td').value,tk_sep:$('tx').value};
+if(s=='custom'){f.tk_url=$('tu').value.trim();f.tk_price=$('tpp').value.trim();f.tk_change=$('tpc').value.trim();f.tk_mode=$('tpm').value;f.tk_spark=$('tps').value.trim()}
+if(!t){f.source_kind='ticker';f.refresh_interval=$('ci').value}return f}
+function tkTest(){var d=C.d||shelfAll().filter(function(x){return bst(x)==''})[0],r=$('tr');if(!d){r.textContent='no awake device to test with';return}$('tt').disabled=true;r.textContent='\u2026 fetching on '+d.name;
+req(base(d),'/api/source/test','POST',tkf(1)).then(function(j){r.className='hint '+(j.ok?'ok':'err');r.textContent=j.ok?j.label+': '+j.price+'  '+j.change+'  ('+j.ms+' ms)':'Error: '+(j.error||j._s)+(j.ms?' ('+j.ms+' ms)':'')}).catch(function(e){r.className='hint err';r.textContent='Error: '+e.message}).then(function(){$('tt').disabled=false})}
+// "For all" (docs/WEB_UI.md "Content for all devices"): the same sheet with a device list (all members ticked, or a saved
+// group from layout.groups); Text goes to the online devices at once and is parked on the relay for the sleeping
+// ones (PUT /api/relay/<id>), a URL is written to the online devices only; one result line per device.
+var C=null;
+function content(all){var d=all?null:M;closeMenu();C={d:d,src:'text',all:!!all,sel:{}};
+// the device's config (d.cfg) stays on its record: the sheet's Showing line names the source once it is known
+if(all){ceGroup('');return}if(d.cfg){C.cfg=d.cfg;C.src=srcOf(d.cfg)}
+ceDraw();req(base(d),'/api/config').then(function(j){if(!C||C.d!=d)return;
+if(j._s!=200)ceMsg(j._s==401?'401 - token?':'HTTP '+j._s,'err');else{C.cfg=d.cfg=j;if(!C.touched)C.src=srcOf(j);ceDraw()}}).catch(function(){ceMsg('no answer','err')})}
+function ceMsg(s,c){var m=$('cm');if(m){m.textContent=s;m.className='hint '+(c||'')}}
+function ceClose(){$('ce').hidden=true;C=null;sheet()}
+function ceBack(){var d=C.d;ceClose();openMenu(d)}
+function shelfAll(){return place().list.filter(function(x){return x.ip})}
+function ceGroup(g){shelfAll().forEach(function(x){C.sel[x.id]=g?(GR[g]||[]).indexOf(x.id)>=0:bst(x)!='offline'});C.grp=g;ceDraw()}
+function groupSave(){var ids=Object.keys(C.sel).filter(function(k){return C.sel[k]}),n=prompt('Name for this group of devices (max 31 chars)',C.grp||'');if(!n||!n.trim())return;GR[n.trim().slice(0,31)]=ids;C.grp=n.trim().slice(0,31);saveLayout([]);ceDraw()}
+function ceDraw(){var d=C.d||{},c=C.cfg||{},s=C.src,b=C.all?'':bst(d),off=b=='offline'||b=='asleep',ss=d.ss||{},e=$('ce'),gs=Object.keys(GR),
+h='<div class="hd"><b>Content - '+(C.all?'all devices':esc(d.name))+'</b><button class="x" onclick="ceClose()" title="Close">&times;</button></div>'+(C.all?'':'<div class="hint">'+d.ip+(off?' &middot; <span class="err">'+b+' - plug it in (USB) to change what it shows</span>':'')+'</div>')+
+'<label>Source</label><select id="cs" onchange="C.src=this.value;C.touched=1;ceDraw()"><option value="text">Text<option value="ticker">Ticker<option value="url">Custom JSON URL'+(C.all?'':'<option value="mqtt">MQTT<option value="push">Push only')+'</select>';
+if(C.all)h+='<label>Devices</label>'+(gs.length?'<select id="cg" onchange="ceGroup(this.value)"><option value="">all members'+gs.map(function(g){return'<option'+(g==C.grp?' selected':'')+'>'+esc(g)}).join('')+'</select>':'')+
+shelfAll().map(function(x){var y=bst(x);return'<div class="row"><input type="checkbox" id="t_'+x.id+'"'+(C.sel[x.id]?' checked':'')+(y=='offline'?' disabled':'')+' onchange="C.sel[\''+x.id+'\']=this.checked"><label for="t_'+x.id+'" style="display:inline;margin:0">'+esc(x.name)+'</label><span class="hint">'+(y=='asleep'?'asleep - via relay':y||'online')+'</span></div>'}).join('')+
+'<div class="row"><button class="sm w" onclick="groupSave()" title="Remember the ticked devices under a name (in layout.json)">Save selection as group</button></div>';
+if(s=='text')h+='<label>Title</label><input type="text" id="ct" maxlength="63" value="'+esc(ss.title)+'"><label>Value</label><input type="text" id="cv" maxlength="127" value="'+esc(ss.value)+'">'+
+'<details><summary>Reactions</summary><div class="row"><input type="checkbox" id="cl"><input type="color" id="cc" value="'+(d.led||'#000000')+'"><span class="hint">LED (unticked = unchanged)</span></div>'+
+'<div class="row"><select id="cn" style="width:auto"><option value="">no sound<option>beep<option>double_beep<option>long_beep</select><input type="range" id="cw" min="0" max="255" value="'+(d.vol==null?255:d.vol)+'"><span class="hint">volume</span></div>'+
+(C.all?'':'<div class="row"><select id="cr" style="width:auto"><option value="off">LED as sent<option value="sign"'+(c.led_rule=='sign'?' selected':'')+'>LED by change: red / green</select><span class="hint">rule for payloads with <code>change</code> / <code>dir</code></span></div>')+'</details>';
+else if(s=='ticker'){var tp=C.tp||c.tk_preset||'coingecko',P=PR[tp],cu=tp=='custom',sel=function(i,v,o){return'<select id="'+i+'" style="width:auto">'+o.map(function(x){return'<option value="'+x[0]+'"'+(String(v)==x[0]?' selected':'')+'>'+x[1]}).join('')+'</select>'};
+h+='<label>Market</label><select id="tp" onchange="C.tp=this.value;ceDraw()">'+Object.keys(PR).map(function(k){return'<option value="'+k+'"'+(k==tp?' selected':'')+'>'+PR[k][0]}).join('')+'</select>'+
+'<div class="row"><input type="text" id="ts" maxlength="31" placeholder="symbol, e.g. '+P[1]+'" value="'+esc(c.tk_symbol)+'"><input type="text" id="tm" maxlength="11" placeholder="market, e.g. '+P[2]+'" value="'+esc(c.tk_market)+'"></div><div class="hint">'+P[3]+'</div>'+
+(cu?'<label>URL</label><input type="text" id="tu" maxlength="127" placeholder="https://proxy.lan/quote/{s}" value="'+esc(c.tk_url)+'"><div class="row"><input type="text" id="tpp" maxlength="31" placeholder="price path" value="'+esc(c.tk_price)+'"><input type="text" id="tpc" maxlength="31" placeholder="change path (optional)" value="'+esc(c.tk_change)+'"></div>'+
+'<div class="row">'+sel('tpm',c.tk_mode||'pct',[['pct','change path is a percentage'],['open','change path is the open price']])+'<input type="text" id="tps" maxlength="31" placeholder="history array path (optional)" value="'+esc(c.tk_spark)+'"></div>':'')+
+'<label>Every N minutes</label><input type="number" id="ci" min="1" max="1440" value="'+(c.source_kind=='ticker'&&c.refresh_interval||5)+'"><div class="hint">'+(d.power=='battery'?'On battery each fetch is a TLS handshake (~2 s awake); 15 min or more is kind to the cell. ':'')+(C.all?'Sleeping devices are skipped - a source can only be set while they are awake. ':'')+'Fetched over HTTPS against the built-in roots; the LED follows the sign when the rule below says so.</div>'+
+'<details><summary>Advanced</summary><label>Label (empty = symbol/market - market name)</label><input type="text" id="tl" maxlength="31" value="'+esc(c.tk_label)+'">'+
+'<div class="row">'+sel('td',c.tk_decimals==null?255:c.tk_decimals,[[255,'auto decimals'],[0,'0 decimals'],[1,'1'],[2,'2'],[3,'3'],[4,'4'],[5,'5'],[6,'6']])+sel('tx',c.tk_sep||'space',[['space','thousands: space'],['comma','thousands: comma'],['none','no separator']])+'</div>'+
+(C.all?'':'<div class="row"><select id="cr" style="width:auto"><option value="off">LED as sent<option value="sign"'+(c.led_rule=='sign'?' selected':'')+'>LED by change: red / green</select><span class="hint">LED rule</span></div>')+'</details>'+
+'<div class="row"><button class="sm w" id="tt" onclick="tkTest()" title="One fetch on the device, nothing saved">Test</button><span id="tr" class="hint"></span></div>'}
+else if(s=='url')h+='<label>URL returning a payload</label><input type="text" id="cu" maxlength="127" placeholder="http://server/api/data" value="'+esc(c.pull_url)+'"><label>Every N minutes</label><input type="number" id="ci" min="1" max="1440" value="'+(c.refresh_interval||60)+'">'+
+'<div class="hint">The device\'s Pull URL: fetched every N minutes - on battery at each wake-up, on USB on a timer - and shown as a payload.'+(C.all?' Sleeping devices are skipped - a URL can only be set while they are awake.':'')+'</div>';
+else if(s=='mqtt')h+='<div class="hint">MQTT '+(c.mqtt_server?'<b>'+esc(c.mqtt_server)+':'+c.mqtt_port+'</b>, topic <b>'+esc(c.mqtt_topic)+'</b> - every message is a payload':C.cfg?'is off on this device':'')+'. Broker and credentials: <a target="_blank" href="'+base(d)+'/system#content">System &#8599;</a></div>';
+else h+='<div class="hint">Shows whatever is POSTed to it:</div><pre>curl -X POST http://'+d.ip+'/api/screen -H \'X-Api-Token: &lt;token&gt;\' -H \'Content-Type: application/json\' -d \'{"title":"Bitcoin","value":"$95,240","alert":{"led":"00FF00"}}\'</pre>';
+h+='<div class="row">'+(s=='text'||s=='url'||s=='ticker'?'<button class="sm w" id="cb" onclick="ceSave()"'+(off?' disabled':'')+'>'+(s=='text'?'Send':'Save')+(C.all?' to selected':'')+'</button>':'')+(C.all?'<button class="sm" onclick="ceClose()">Close</button>':'<button class="sm" onclick="ceBack()" title="Back to the device">Back</button>')+'<span id="cm" class="hint"></span></div>';
+e.innerHTML=h;e.hidden=false;$('cs').value=s;sheet(C.f?null:e);C.f=1}
+function ceSave(){var d=C.d,p,f,a={},r,cf={},c=C.cfg||{};$('cb').disabled=true;ceMsg('\u2026');
+if(C.src=='text'){p={title:$('ct').value,value:$('cv').value};if($('cl').checked)a.led=$('cc').value.slice(1);if($('cn').value){a.sound=$('cn').value;a.volume=+$('cw').value}if(a.led||a.sound)p.alert=a;
+// per device: the LED rule when it changed, and source_kind=text when a ticker was running (it would overwrite the text at its next fetch)
+if(!C.all){r=$('cr').value;if(r!=(c.led_rule||'off'))cf.led_rule=r;if(c.source_kind=='ticker')cf.source_kind='text';if(Object.keys(cf).length)req(base(d),'/config','POST',cf).then(function(j){if(j._s==200)C.cfg=Object.assign(c,cf)})}}
+else if(C.src=='ticker'){f=tkf();if(!C.all){r=$('cr').value;if(r!=(c.led_rule||'off'))f.led_rule=r}}
+else f={source_kind:'url',pull_url:$('cu').value.trim(),refresh_interval:$('ci').value};
+if(C.all){var ids=Object.keys(C.sel).filter(function(k){return C.sel[k]}),rl=relayOf();
+pool(ids,function(id){var x=D[id],y=bst(x),away=y=='asleep'||y=='offline';
+if(!p)return away?Promise.resolve('asleep - plug it in to change its source'):req(base(x),'/config','POST',f).then(function(j){return j._s==200?'saved':'HTTP '+j._s});
+if(!away)return req(base(x),'/api/screen','POST',null,p).then(function(j){if(j._s==202)x.next=Date.now()+3000;return j._s==202?'sent':'HTTP '+(j.error||j._s)});
+if(!rl)return Promise.resolve('asleep - no relay (USB member) on the shelf');
+return req(base(rl),'/api/relay/'+id,'PUT',null,p).then(function(j){return j._s==200?'parked on '+rl.name+' - shown on its next wake':'relay: '+(j.error||'HTTP '+j._s)})})
+.then(function(res){var m=$('cm');if(m)m.innerHTML=ids.map(function(id,i){return'<div>'+esc(D[id].name)+': '+esc(res[i])+'</div>'}).join('')||'no device selected';pollRelay()}).then(function(){var b=$('cb');if(b)b.disabled=false});return}
+req(base(d),p?'/api/screen':'/config','POST',f,p).then(function(j){var ok=j._s==(p?202:200);
+ceMsg(ok?(p?'Sent.':'Saved.'):'Error: '+(j.error||((j._t||'').match(/<pre>([^<]*)/)||[])[1]||'HTTP '+j._s).trim(),ok?'ok':'err');
+if(ok){if(p)d.next=Date.now()+3000;else C.cfg=Object.assign(C.cfg||{},f)}}).catch(function(e){ceMsg('Error: '+e.message,'err')}).then(function(){var b=$('cb');if(b)b.disabled=false})}
+// ---- identify mode: number the devices 1..N in shelf order, each shows its number for 30 s
+// (shelf order = row by row; offline/asleep skipped). "Identify this" in the device menu numbers one device with
+// its shelf number through the same send and the same 30 s hold; the global button stops everything numbered.
+var ID=null;
+function shelfOrder(){return place().list.filter(function(d){var s=bst(d);return d.ip&&s!='offline'&&s!='asleep'}).sort(function(a,b){return a.y-b.y||a.x-b.x})}
+function identSend(d,n){d.num=n;return req(base(d),'/api/screen/identify','POST',null,n?{n:n,ttl_s:30}:{n:0}).then(function(j){if(n&&j._s!=200)st(d.name+': identify '+(j.error||j._s),'err')}).catch(function(){})}
+function idOn(){if(ID)clearTimeout(ID.t);ID={t:setTimeout(function(){identOff(false)},30000)};$('idb').textContent='Stop identify';paint()}
+function identify(){if(ID){identOff(true);return}shelfOrder().forEach(function(d,i){identSend(d,i+1)});idOn()}
+function anyNum(){var k;for(k in D)if(D[k].num)return true;return false}
+// Stop identify on the last numbered device ends the mode: the toolbar label follows "any device numbered".
+function identOne(){var d=M,i=shelfOrder().indexOf(d);closeMenu();if(d.num){identSend(d,0);if(anyNum())paint();else identOff(false)}else if(i>=0){identSend(d,i+1);idOn()}}
+function identOff(send){var k;if(ID)clearTimeout(ID.t);ID=null;for(k in D){var d=D[k];if(d.num){if(send)identSend(d,0);d.num=0}}$('idb').textContent='Identify';paint()}
+function toggleMore(on){var m=$('more');m.hidden=on===true?false:!m.hidden}
+// ---- group OTA (docs/WEB_UI.md "Update firmware"): POST /update to every online USB member in turn (this device
+// last - its reboot ends the page), progress on the card badge and in the list; a sleeping member gets
+// PUT /api/relay/<id>/ota {"url"} on the relay and fetches the image itself on its next wake (update_from_url).
+function otaLine(d,s){d.ot=s;$('ol').innerHTML=shelfAll().filter(function(x){return x.ot}).map(function(x){return'<div>'+esc(x.name)+': '+esc(x.ot)+'</div>'}).join('')}
+function otaOne(d,f){return new Promise(function(res){var x=new XMLHttpRequest(),fd=new FormData();x.open('POST',base(d)+'/update');if(T)x.setRequestHeader('X-Api-Token',T);
+x.upload.onprogress=function(e){if(e.lengthComputable){d.up=Math.round(e.loaded*100/e.total);otaLine(d,'flashing '+d.up+' %');paint()}};
+x.onload=function(){var r={};try{r=JSON.parse(x.responseText)}catch(e){}var ok=x.status==200&&r.ok;d.up=null;otaLine(d,ok?'flashed '+r.written+' B to '+r.target+', rebooting':'failed: '+(r.error||x.statusText||x.status));paint();res(ok)};
+x.onerror=function(){d.up=null;otaLine(d,'failed: connection lost');paint();res(false)};fd.append('update',f,f.name);x.send(fd)})}
+function otaAll(){var f=$('of').files[0],u=$('ou').value.trim(),all=shelfAll(),on=all.filter(function(d){return bst(d)==''&&d.power=='usb'}).sort(function(a,b){return(a.self?1:0)-(b.self?1:0)}),sl=all.filter(function(d){return bst(d)=='asleep'}),rl=relayOf(),q=Promise.resolve();
+if(!f&&!(u&&sl.length)){$('ol').textContent='Choose the .bin file (and/or a URL for the sleeping members).';return}
+if(!confirm('Update '+(f?on.length+' online device(s) with "'+f.name+'" ('+f.size+' bytes)':'')+(u&&sl.length?(f?' and ':'')+sl.length+' sleeping device(s) from '+u:'')+'?\n\nDevices reboot one after another - keep them powered.'))return;
+$('ob').disabled=true;all.forEach(function(d){d.ot=''});
+if(u)sl.forEach(function(d){q=q.then(function(){if(!rl){otaLine(d,'asleep - no relay (USB member) on the shelf');return}return req(base(rl),'/api/relay/'+d.id+'/ota','PUT',null,{url:u}).then(function(j){otaLine(d,j._s==200?'update parked on '+rl.name+' - flashes on its next wake':'relay: '+(j.error||'HTTP '+j._s))})})});
+if(f)on.forEach(function(d){q=q.then(function(){otaLine(d,'uploading\u2026');return otaOne(d,f)}).then(function(ok){if(ok&&d.self)setTimeout(function(){location.reload()},15000)})});
+q.then(function(){pollRelay();$('ob').disabled=false})}
+// ---- "Protect this device" (docs/WEB_UI.md "First open and Protect this device"): shown while the host has no API
+// token. The token is generated here, shown once, written with POST /config (the API is still open at
+// that moment), kept in localStorage and offered to the other open devices on the shelf.
+var PT=null,PD=0,PH='<div class="t"><b>This device is open</b> to anyone on your Wi-Fi - no API token is set.</div><button class="sm" onclick="protGen()">Protect it</button><button class="sm" onclick="protLater()">Not now</button>';
+// PD: a status poll that was in flight while the token was being set must not bring the card back
+function protShow(open){var l,p=$('prot');try{l=localStorage.tickr_protect_later}catch(e){}if(PT||open&&Date.now()-PD<20000)return;if(!p.innerHTML)p.innerHTML=PH;p.hidden=!(open&&!l)}
+function protLater(){try{localStorage.tickr_protect_later=1}catch(e){}PT=null;$('prot').hidden=true;$('prot').innerHTML=PH}
+function protGen(){var a=new Uint8Array(16);crypto.getRandomValues(a);PT=Array.prototype.map.call(a,hx).join('');
+$('prot').innerHTML='<div class="t"><div class="hint">Your API token - shown once. Save it (password manager): every page and script sends it as X-Api-Token. Lost it? Recovery mode: switch the device off and on 3 times.</div><div id="tk">'+PT+'</div></div><button class="sm" onclick="navigator.clipboard&&navigator.clipboard.writeText(PT)">Copy</button><button class="sm" onclick="protSet()">Set token</button><button class="sm" onclick="PT=null;$(\'prot\').innerHTML=PH">Cancel</button>'}
+function openDev(d){return fetch(base(d)+'/api/status',{signal:ctl()}).then(function(r){return r.json()}).then(function(s){return s.auth_enabled===false?d:null}).catch(function(){return null})}
+// Set tok on every open device of the list (its API is open, POST /config needs no credentials yet).
+function offerToken(l,tok){return Promise.all(l.map(function(d){return req(base(d),'/config','POST',{api_token:tok}).then(function(j){st(d.name+': '+(j._s==200?'protected':'HTTP '+j._s),j._s==200?'ok':'err');return j._s==200})}))}
+function protSet(){var tok=PT,k,c=[];req(HB,'/config','POST',{api_token:tok}).then(function(j){if(j._s!=200)throw new Error('HTTP '+j._s);T=tok;$('tok').value=T;try{localStorage.tickr_token=T;delete localStorage.tickr_protect_later}catch(e){}PT=null;PD=Date.now();$('prot').hidden=true;$('prot').innerHTML=PH;st('Token set on this device.','ok');
+var m=me&&D[me.id];if(m){m.ledAt=0;if(m.si)m.si.auth_enabled=true}
+for(k in D){var d=D[k];if(!d.self&&inGrid(d)&&d.ip&&!d.gone&&d.st!='off'&&d.st!='sleep')c.push(d)}return Promise.all(c.map(openDev))}).then(function(o){o=o.filter(Boolean);if(!o.length||!confirm('Use the same token on the other open device(s): '+o.map(function(d){return d.name}).join(', ')+'?'))return;
+return offerToken(o,tok)}).then(refresh).catch(function(e){st('Token not set: '+e.message,'err')})}
+// Wizard (docs/WEB_UI.md "Pair a device / join a group"): a device to pair that has no token yet gets this browser's token first -
+// group functions need one on every device and "the same token everywhere" is the default case.
+function protect(t){return openDev(t).then(function(o){if(!o||!confirm(t.name+' has no API token yet. Set the token of this browser on it first? (Pairing needs one on every device.)'))return;
+return offerToken([t],T).then(function(r){log(r[0]?'Token set on '+t.name:'Could not set the token on '+t.name,r[0]?'ok':'err')})})}
+// ---- writes: own slot on each moved device + layout.json on every USB member
+function saveLayout(ch){var k,ps=[],n=0,f=0;for(k in D)if(D[k].tmp)ch.push(D[k]);
+ch.forEach(function(d){if(d.st=='off'||d.st=='sleep'||d.gone&&!d.self)return;ps.push(req(base(d),'/api/identity','POST',null,{layout:{x:d.x,y:d.y}}).then(function(j){if(j._s==200)d.tmp=false;else f++}).catch(function(){f++}))});
+var doc={v:1,updated_at:Date.now(),by:me?me.id:'',devices:{}};for(k in D)if(inGrid(D[k])&&D[k].ip)doc.devices[k]={x:D[k].x,y:D[k].y,name:D[k].name};
+if(Object.keys(GR).length)doc.groups=GR;   // content groups travel with the layout (validated by the device)
+for(k in D){var d=D[k];if(!inGrid(d)||!d.ip||d.power!='usb'||d.st=='off'||d.gone&&!d.self)continue;ps.push(req(base(d),'/api/layout','PUT',null,doc).then(function(j){if(j._s==200)n++;else f++}).catch(function(){f++}))}
+L=doc;st('Saving layout...');Promise.all(ps).then(function(){st('Layout saved to '+n+' device(s)'+(f?', '+f+' request(s) failed':''),f?'err':'ok');cacheSave();paint()})}
+function rename(){var d=M,n=prompt('Name for '+d.name+' (max 31 ASCII chars)',d.name);if(n==null)return;closeMenu();
+req(base(d),'/api/identity','POST',null,{name:n.trim()}).then(function(j){if(j._s!=200){st('Rename failed: '+(j.error||j._s),'err');return}fromIdent(d,j);st('Renamed to '+j.name,'ok');paint();saveLayout([])}).catch(function(e){st('Rename failed: '+e.message,'err')})}
+function forgetId(id){var d=D[id];closeMenu();if(d.self||!confirm('Forget '+d.name+' on this device? It comes back with its next beacon.'))return;
+req(HB,'/api/peers/'+id,'DELETE').then(function(j){if(j._s==200){if(d.el&&d.el.parentNode)d.el.parentNode.removeChild(d.el);delete D[id];cacheSave();refresh()}else st('Forget failed: '+(j.error||j._s),'err')})}
+function addIp(){var ip=$('ip').value.trim();if(!ip)return;req(HB,'/api/peers','POST',null,{ip:ip}).then(function(j){st(j._s==202?'Probing '+ip+' ...':'Error: '+(j.error||j._s),j._s==202?'ok':'err');$('ip').value='';setTimeout(refresh,2000)})}
+// ---- group wizard (docs/MULTI_DEVICE.md "The pairing protocol") ------------
+var fillSig='';
+function fill(){var t=$('target'),s=$('src'),i,sig=me.name+!!me.group+peers.map(function(p){return p.id+p.name+p.member+p.power}).join();
+if(sig==fillSig)return;fillSig=sig;t.innerHTML=s.innerHTML='';
+t.add(new Option('this device ('+me.name+')','me'));s.add(new Option('- create a new group -',''));s.add(new Option('this device ('+me.name+')','me'));
+for(i=0;i<peers.length;i++){var p=peers[i],l=p.name+' '+p.ip+(p.member?' [member]':'')+(p.power!='usb'?' [battery]':'');t.add(new Option(l,i));s.add(new Option(l,i))}
+if(me.group)s.value='me';fill2()}
+function fill2(){var v=$('src').value;$('gname').parentNode.hidden=v!=='';}
+function pairWith(id){var i;closeMenu();toggleMore(true);$('target').value=id==(me&&me.id)?'me':'';for(i=0;i<peers.length;i++)if(peers[i].id==id)$('target').value=i;
+if(me.group)$('src').value='me';else{for(i=0;i<peers.length;i++)if(peers[i].member){$('src').value=i;break}}fill2();location.hash='';location.hash='#group'}
+function wdev(v){return v==='me'?{ip:HOST,name:me.name,member:!!me.group}:peers[+v]}
+function getCreds(b){var sk=TC.rnd(32),pk=TC.pub(sk),q='?pk='+encodeURIComponent(TC.b64(pk));
+function go(n){return req(b,'/api/group/secret'+q).then(function(j){if(j._s==200)return j;if(j._s==202&&n<30)return wait(400).then(function(){return go(n+1)});if(j._s==429&&n<30)return wait(2100).then(function(){return go(n+1)});throw new Error('group/secret: '+(j.error||('HTTP '+j._s)))})}
+return go(0).then(function(j){var K=TC.x25519(sk,TC.unb64(j.pk_a)),ke=TC.groupKey(K,TC.unb64(j.n_a),pk,TC.unb64(j.pk_a)),m=TC.open(ke,TC.unb64(j.box));sk.fill(0);K.fill(0);if(!m)throw new Error('credentials box does not verify');return TC.credsUnpack(m)})}
+function pair(b,creds,mode,oldSecret){var sk=TC.rnd(32),pk=TC.pub(sk);W={};
+return req(b,'/api/pair/start','POST',{pk:TC.b64(pk),mode:mode}).then(function(j){if(j._s!=202)throw new Error('start: '+(j.error||'HTTP '+j._s));
+function go(n){return req(b,'/api/pair/status').then(function(s){if(s.state=='pairing'&&s.sid==j.sid)return s;if(s.state=='starting'&&n<40)return wait(300).then(function(){return go(n+1)});throw new Error('start failed: '+(s.error||s.state))})}
+return go(0)}).then(function(s){var K=TC.x25519(sk,TC.unb64(s.pk_d)),d=TC.derive(K,TC.unb64(s.n_d),pk,TC.unb64(s.pk_d));sk.fill(0);K.fill(0);W.kc=d.kc;W.ke=d.ke;W.sid=s.sid;W.b=b;W.creds=creds;W.mode=mode;W.old=oldSecret;
+if(mode=='rekey')return confirm2();
+$('chk').textContent=d.chk;$('wiz').hidden=false;$('agree').checked=false;$('code').value='';$('code').disabled=true;$('go').disabled=true;
+log('Pairing screen is on the device (expires in '+s.expires_s+' s). Compare the check word, then enter the code.');
+return new Promise(function(res,rej){W.res=res;W.rej=rej})})}
+function agreed(){var a=$('agree').checked;$('code').disabled=!a;codeIn();if(a)$('code').focus()}
+function codeIn(){$('go').disabled=!($('agree').checked&&/^\d{6}$/.test($('code').value))}
+function confirm2(){var f={sid:W.sid},code=$('code').value,exp;
+if(!W||(W.mode!='rekey'&&!$('agree').checked))return;
+f.ci=TC.b64(W.mode=='rekey'?TC.hmac(W.kc,TC.cat(TC.str('rekey'),W.old)):TC.hmac(W.kc,TC.str('i'+code)));
+if(W.creds)f.box=TC.b64(TC.seal(W.ke,TC.credsPack(W.creds)));else f.name=$('gname').value||'Group';
+exp=W.mode=='rekey'?TC.hmac(W.kc,TC.cat(TC.str('d-rekey'),W.creds.secret)):TC.hmac(W.kc,TC.str('d'+code));
+$('go').disabled=true;
+return req(W.b,'/api/pair/confirm','POST',f).then(function(j){
+if(j._s==401){log('Wrong code, '+j.attempts_left+' attempt(s) left','err');$('go').disabled=false;return}
+if(j._s!=200){var e=new Error('confirm: '+(j.error||'HTTP '+j._s));if(W.rej)W.rej(e);else throw e;return}
+if(!TC.eq(TC.unb64(j.c_d),exp)){var e2=new Error('device confirmation failed - do not trust this pairing');if(W.rej)W.rej(e2);else throw e2;return}
+log('Paired: '+j.group.name+' (epoch '+j.group.epoch+')','ok');if(W.mode!='rekey')idOffer();if(W.res)W.res(j)})}
+// After a pair, offer Identify (the new member reaches the shelf with its next beacon, <= 45 s)
+function idOffer(){var b=document.createElement('button');b.className='sm w';b.textContent='Identify now';b.title='Arrange your shelf: every device shows its number (the new one after its next beacon, up to 45 s)';b.onclick=function(){b.remove();if(!ID)identify()};$('log').appendChild(b)}
+function done(){$('wiz').hidden=true;if(W){if(W.creds)W.creds.secret.fill(0);if(W.kc)W.kc.fill(0);if(W.ke)W.ke.fill(0)}W=null;refresh()}
+function cancel(){if(W&&W.b)req(W.b,'/api/pair/cancel','POST',{});if(W&&W.rej)W.rej(new Error('cancelled'));done()}
+function start(){var t=wdev($('target').value),sv=$('src').value,s=sv===''?null:wdev(sv);$('log').textContent='';
+if(!T){log('Set the API token first (group functions require one on every device).','err');return}
+if(s&&s.ip==t.ip){log('Source and target are the same device.','err');return}
+$('start').disabled=true;
+protect(t).then(function(){return s?getCreds(base(s)).then(function(c){log('Credentials of "'+c.name+'" received from '+s.name+' (not stored)');return pair(base(t),c,'code')}):pair(base(t),null,'code')})
+.then(done).catch(function(e){log('Error: '+e.message,'err');done()}).then(function(){$('start').disabled=false})}
+function leave(){if(!confirm('Leave the group on this device?'))return;req(HB,'/api/group/leave','POST',{}).then(function(j){log(j._s==200?'Left the group.':'Error: '+(j.error||j._s),j._s==200?'ok':'err');refresh()})}
+function rekey(){var old,nw,i,q=Promise.resolve();$('log').textContent='';
+if(!confirm('Rotate the group secret? Every member on USB is re-keyed from here; sleeping members must be paired again.'))return;
+getCreds(HB).then(function(c){old=c;return req(HB,'/api/group/rekey','POST',{})}).then(function(j){if(j._s!=200)throw new Error('rekey: '+(j.error||j._s));log('New epoch '+j.epoch+' on this device');return getCreds(HB)}).then(function(c){nw=c;
+for(i=0;i<peers.length;i++)if(peers[i].member&&peers[i].power=='usb')(function(p){q=q.then(function(){log('Re-keying '+p.name+' ...');return pair(base(p),nw,'rekey',old.secret)}).catch(function(e){log(p.name+': '+e.message,'err')})})(peers[i]);
+return q}).then(function(){old.secret.fill(0);nw.secret.fill(0);log('Rotation finished.','ok');done()}).catch(function(e){log('Error: '+e.message,'err');done()})}
+// ---- boot ----------------------------------------------------------------
+function init(){if(T)$('tok').value=T;if(location.hash=='#group')toggleMore(true);if(MQ.matches)$('st').textContent='Tap a device for its menu; arrange the shelf with Move in the menu.';
+cacheLoad();paint();refresh();setInterval(refresh,15000);setInterval(tick,250);document.addEventListener('visibilitychange',function(){if(!document.hidden)refresh()});
+document.addEventListener('click',function(e){if(M&&!e.target.closest('#menu,#ce'))closeMenu()});$('grid').addEventListener('click',gridClick);
+document.addEventListener('keydown',function(e){if(e.key=='Escape'){if(MV)moveEnd();closeMenu();ceClose()}})}
+</script>
+</head>
+<body>
+<div class="container">
+{{include:_nav.html}}
+<div class="bar"><h2>Shelf</h2><button id="idb" class="sm w" onclick="identify()" title="Every device shows its number for 30 s">Identify</button><button class="sm w" onclick="content(1)" title="Content for every device; sleeping ones get it on their next wake">For all&hellip;</button><button class="sm" onclick="toggleMore()" title="Token, group, nearby devices, updates">&hellip;</button></div>
+{{include:_tokbar.html}}
+<div id="prot" class="card" hidden></div>
+<div id="grid" class="card"></div>
+<div id="st" class="hint">Click a device for its menu; drag the screens to arrange the shelf (positions are stored on the devices).</div>
+<div id="bk" onclick="closeMenu();ceClose()"></div>
+<div id="menu" class="card" role="dialog" tabindex="-1" hidden></div>
+<div id="ce" class="card" role="dialog" tabindex="-1" hidden></div>
+<div id="more" hidden>
+<div class="card">
+  <div>This device: <b id="me">&hellip;</b> &middot; Group: <b id="grp">&hellip;</b></div>
+  <label>API token (same token on every device; kept in this browser, the group secret never is)</label>
+  <input type="password" id="tok" autocomplete="off" onchange="tokSave(this.value)">
+  <div class="row"><span class="hint z">Zoom</span><input class="z" type="range" min="120" max="420" value="200" oninput="zoom(this.value)"><input type="text" id="ip" placeholder="add by IP (other subnet)"><button class="sm w" onclick="addIp()">Probe</button></div>
+  <div class="hint">LED bar = the device's LED colour (off = neutral); grey dashed = offline, blue-grey = asleep, amber = stale.</div>
+</div>
+<h2>Nearby - not in this group</h2>
+<div class="card" id="near"></div>
+<h2 id="group">Group</h2>
+<div class="card">
+  <div class="row w"><button id="leave" class="danger" onclick="leave()" disabled>Leave group</button><button id="rekey" onclick="rekey()" disabled>Rotate secret</button></div>
+  <label>Device to pair (shows the code on its screen)</label><select id="target"></select>
+  <label>Take group credentials from</label><select id="src" onchange="fill2()"></select>
+  <div><label>Name of the new group</label><input type="text" id="gname" maxlength="31" placeholder="Shelf"></div>
+  <div class="hint">Pairing works on USB power only. The device shows a 6-digit code and a 4-letter check word for 90 s; 3 wrong codes close the session.</div>
+  <div class="row w"><button id="start" onclick="start()">Start pairing</button></div>
+  <div id="wiz" hidden>
+    <div id="chk">&hellip;</div>
+    <div><input type="checkbox" id="agree" onchange="agreed()"> <label for="agree" style="display:inline">The check word above and the one on the device's screen match</label></div>
+    <label>Code from the screen</label><input type="text" id="code" inputmode="numeric" maxlength="6" pattern="\d*" disabled oninput="codeIn()">
+    <div class="row"><button id="go" onclick="confirm2()" disabled>Confirm</button><button class="danger" onclick="cancel()">Cancel</button></div>
+  </div>
+  <div id="log"></div>
+</div>
+<h2>Updates</h2>
+<div class="card">
+  <div class="row w"><input type="file" id="of" accept=".bin,application/octet-stream"><button class="sm" id="ob" onclick="otaAll()">Update all members</button></div>
+  <input type="text" id="ou" class="w" maxlength="127" placeholder="URL of the same .bin for sleeping members (optional)">
+  <div class="hint">Online USB members one after another (this device last; the page reloads after its reboot). Sleeping members fetch the URL themselves on their next wake. The previous firmware stays in the other slot.</div>
+  <div id="ol" class="hint"></div>
+</div>
+</div>
+</div>
+<script>init();</script>
+</body></html>

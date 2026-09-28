@@ -1,0 +1,142 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PLATFORMIO_VERSION: "6.2.0"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+defaults:
+  run:
+    working-directory: tickr_display
+
+jobs:
+  firmware:
+    name: Firmware (tickr, tickr_dev)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # full history: `git describe` needs the tags for FIRMWARE_VERSION
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-firmware-${{ runner.os }}-${{ hashFiles('tickr_display/platformio.ini') }}
+          restore-keys: |
+            pio-firmware-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install "platformio==${PLATFORMIO_VERSION}"
+
+      - name: Build firmware
+        # tickr_dev (ArduinoOTA + mDNS) is built only to keep that code compiling;
+        # it is neither size-gated nor released.
+        run: pio run -e tickr -e tickr_dev
+
+      - name: Check the release image fits the stock OTA partition
+        run: python scripts/check_size.py $(ls dist/*.bin | grep -v -- '-dev.bin')
+
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: firmware
+          path: |
+            tickr_display/dist/*.bin
+            !tickr_display/dist/*-dev.bin
+          if-no-files-found: error
+          retention-days: 30
+
+  unit-tests:
+    name: Unit tests (native)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-native-${{ runner.os }}-${{ hashFiles('tickr_display/platformio.ini') }}
+          restore-keys: |
+            pio-native-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install "platformio==${PLATFORMIO_VERSION}"
+
+      - name: Run tests
+        run: pio test -e native
+
+  static-analysis:
+    name: Static analysis (cppcheck)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.platformio
+            ~/.cache/pip
+          key: pio-firmware-${{ runner.os }}-${{ hashFiles('tickr_display/platformio.ini') }}
+          restore-keys: |
+            pio-firmware-${{ runner.os }}-
+
+      - name: Install PlatformIO
+        run: pip install "platformio==${PLATFORMIO_VERSION}"
+
+      - name: cppcheck (project sources only, fail on HIGH defects)
+        run: pio check -e tickr --skip-packages --fail-on-defect=high
+
+  release:
+    name: GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [firmware, unit-tests]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: firmware
+          path: dist
+
+      - name: List release assets
+        working-directory: .
+        run: ls -la dist
+
+      - uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3
+        with:
+          files: dist/*.bin
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          body: |
+            ## TickrDisplay ${{ github.ref_name }}
+
+            | File | Use for |
+            |------|---------|
+            | `tickrdisplay-${{ github.ref_name }}.bin` | **OTA** via the stock `/update` page or UART flashing. 4 MB partition table (`default.csv`), identical to the stock layout - safe on any device. |
+
+            See `docs/FLASHING.md` for flashing and `docs/DEVELOPMENT.md` for build details.

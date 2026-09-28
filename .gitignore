@@ -1,0 +1,36 @@
+# PlatformIO
+.pio/
+tickr_display/dist/
+# Build product of tickr_display/scripts/build_www.py (gzip'ed web UI)
+tickr_display/src/web/generated/
+# Build product of tickr_display/scripts/build_ca_bundle.py (TLS root bundle)
+tickr_display/src/generated/
+
+# Firmware images produced by builds. Vendor binaries and flash dumps are
+# never tracked (see docs/LEGAL.md).
+/*.bin
+/tickr_display/**/*.bin
+
+# Device backups (scripts/backup_device.sh)
+backup_*/
+
+# Private session notes, bench addresses, tokens (never published)
+private/
+
+# Editors / IDEs
+# Cursor project rules and agent settings are local, not part of the repo
+.cursor/
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+
+# Python
+venv/
+.venv/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
