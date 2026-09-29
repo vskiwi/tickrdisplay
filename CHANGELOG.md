@@ -6,6 +6,49 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/)
 and this project adheres to [Semantic Versioning](https://semver.org/).
 Until `1.0.0` minor versions may contain breaking changes.
 
+## [Unreleased]
+
+## [0.2.0] - 2026-09-29
+
+### Added
+
+- **Wi-Fi**: a link supervisor on USB power – the device re-issues its own
+  connect attempts when the link stays down (25 s, then 15 s → 60 s
+  back-off), also when the Wi-Fi core has given up or the address was lost
+  while associated, and restarts itself after 30 min without a link; idle
+  while the set-up portal, the recovery access point or a firmware write is
+  active, not used on the battery flow. Link diagnostics in
+  `GET /api/status` (`wifi_disconnects`, `wifi_last_reason`, `wifi_down_s`,
+  `wifi_reconnects`, `wifi_restarts`), kept in RTC memory across software
+  restarts and deep sleep, and one serial line per loss, attempt and
+  restart in the release build. DHCP hostname `<device-name>-XXXXXX` from
+  the device name (RFC 1123 label, `tickr` when empty) and the MAC suffix,
+  applied from the next boot after a rename; `/api/system/info` →
+  `wifi.hostname`.
+- **Tickers**: Binance futures presets *USDⓈ-M* (`fapi`) and *COIN-M*
+  (`dapi`) – perpetual and quarterly contracts through the market field
+  (`USDT`, `USDT_261225`, `USD_PERP`, `USD_261225`); on a perpetual a second
+  request fetches the **funding rate**, drawn in place of the age line as
+  `FR +0.0100%`; a missed funding request keeps the last text without
+  failing the fetch. `POST /api/source/test` reports it as `funding`.
+- **Tools**: `scripts/flash_ota.ps1`, the OTA upload script for Windows
+  PowerShell (same arguments and behaviour as `flash_ota.sh`, no external
+  tools).
+
+### Changed
+
+- **Documentation**: flashing and updating are described for the browser
+  first (`/system` → *Firmware*: version, slot, MD5, upload, *Boot other
+  partition*; how to tell two images apart); the shell scripts moved to an
+  optional *Command-line tools* section of `docs/FLASHING.md`.
+
+### Fixed
+
+- **Wi-Fi**: a device that lost the router (reboot, firmware update, band
+  steering) could stay on the *No Wi-Fi* card until a power cycle – the
+  Wi-Fi core's auto-reconnect stops on some disconnect reasons and nothing
+  retried.
+
 ## [0.1.0] - 2026-09-28
 
 First public release. Everything below describes what the firmware does on
@@ -68,4 +111,6 @@ the day of the release; the development history before it was private.
   gate for the web UI; `TICKR_LOG_VERBOSE` build flag for the informational
   serial log.
 
+[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vskiwi/tickrdisplay/releases/tag/v0.1.0
