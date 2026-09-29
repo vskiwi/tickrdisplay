@@ -260,12 +260,14 @@ function beep(){test(M,'beep')}
 var PR={coingecko:['CoinGecko','bitcoin','usd','coin id + currency (bitcoin, ethereum, solana / usd, eur); ~10 requests per minute'],
 kraken:['Kraken','XBT','USD','pair = symbol + market (XBT USD, ETH EUR); the 24 h change is computed from the open'],
 binance:['Binance','BTC','USDT','symbol + market (BTC USDT, ETH BTC); 6 000 requests per minute, geo-blocked in some countries'],
+binance_usdm:['Binance USD\u24C8-M futures','BTC','USDT','symbol + market: USDT = perpetual, USDT_261225 = the quarterly contract expiring on that date (YYMMDD); the funding rate replaces the age line; two requests per refresh'],
+binance_coinm:['Binance COIN-M futures','BTC','USD_PERP','symbol + market: USD_PERP = perpetual, USD_261225 = quarterly; the funding rate replaces the age line; two requests per refresh'],
 custom:['Custom JSON','','','any JSON API: {s} / {m} in the URL are replaced by symbol / market; paths like $.data[0].last or result.*.c[0] (* = first key)']};
 function tkf(t){var s=$('tp').value,f={tk_preset:s,tk_symbol:$('ts').value.trim(),tk_market:$('tm').value.trim(),tk_label:$('tl').value.trim(),tk_decimals:$('td').value,tk_sep:$('tx').value};
 if(s=='custom'){f.tk_url=$('tu').value.trim();f.tk_price=$('tpp').value.trim();f.tk_change=$('tpc').value.trim();f.tk_mode=$('tpm').value;f.tk_spark=$('tps').value.trim()}
 if(!t){f.source_kind='ticker';f.refresh_interval=$('ci').value}return f}
 function tkTest(){var d=C.d||shelfAll().filter(function(x){return bst(x)==''})[0],r=$('tr');if(!d){r.textContent='no awake device to test with';return}$('tt').disabled=true;r.textContent='\u2026 fetching on '+d.name;
-req(base(d),'/api/source/test','POST',tkf(1)).then(function(j){r.className='hint '+(j.ok?'ok':'err');r.textContent=j.ok?j.label+': '+j.price+'  '+j.change+'  ('+j.ms+' ms)':'Error: '+(j.error||j._s)+(j.ms?' ('+j.ms+' ms)':'')}).catch(function(e){r.className='hint err';r.textContent='Error: '+e.message}).then(function(){$('tt').disabled=false})}
+req(base(d),'/api/source/test','POST',tkf(1)).then(function(j){r.className='hint '+(j.ok?'ok':'err');r.textContent=j.ok?j.label+': '+j.price+'  '+j.change+(j.funding!=null?'  '+(j.funding||'funding: n/a'):'')+'  ('+j.ms+' ms)':'Error: '+(j.error||j._s)+(j.ms?' ('+j.ms+' ms)':'')}).catch(function(e){r.className='hint err';r.textContent='Error: '+e.message}).then(function(){$('tt').disabled=false})}
 // "For all" (docs/WEB_UI.md "Content for all devices"): the same sheet with a device list (all members ticked, or a saved
 // group from layout.groups); Text goes to the online devices at once and is parked on the relay for the sleeping
 // ones (PUT /api/relay/<id>), a URL is written to the online devices only; one result line per device.

@@ -43,6 +43,9 @@ void test_enum_strings_round_trip(void) {
     TEST_ASSERT_EQUAL_UINT8(SRC_KIND_NONE, source_kind_parse(NULL));
     TEST_ASSERT_EQUAL_STRING("kraken", source_preset_str(SRC_PRESET_KRAKEN));
     TEST_ASSERT_EQUAL_UINT8(SRC_PRESET_BINANCE, source_preset_parse("binance"));
+    TEST_ASSERT_EQUAL_UINT8(SRC_PRESET_BINANCE_USDM, source_preset_parse("binance_usdm"));
+    TEST_ASSERT_EQUAL_UINT8(SRC_PRESET_BINANCE_COINM, source_preset_parse("binance_coinm"));
+    TEST_ASSERT_EQUAL_STRING("binance_coinm", source_preset_str(SRC_PRESET_BINANCE_COINM));
     TEST_ASSERT_EQUAL_UINT8(SRC_PRESET_CUSTOM, source_preset_parse("yahoo"));
     TEST_ASSERT_EQUAL_STRING("custom", source_preset_str(99));
     TEST_ASSERT_EQUAL_UINT8(SRC_SEP_COMMA, source_sep_parse("comma"));
@@ -163,6 +166,50 @@ void test_resolve_binance_upper_cases_symbol(void) {
     TEST_ASSERT_EQUAL_UINT8(SRC_DECIMALS_AUTO, p.decimals);
 }
 
+void test_resolve_binance_futures_urls_labels_and_funding(void) {
+    SourcePlan p;
+    // USDS-M perpetual: fapi, spot-like paths, "BTC/USDT PERP - Binance", a funding request
+    TEST_ASSERT_TRUE(source_resolve(spec(SRC_PRESET_BINANCE_USDM, "btc", "usdt"), &p));
+    TEST_ASSERT_EQUAL_STRING("https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT", p.url);
+    TEST_ASSERT_EQUAL_STRING("$.lastPrice", p.path_price);
+    TEST_ASSERT_EQUAL_STRING("$.priceChangePercent", p.path_change);
+    TEST_ASSERT_EQUAL_UINT8(SRC_CHG_PCT, p.change_mode);
+    TEST_ASSERT_EQUAL_STRING("BTC/USDT PERP - Binance", p.label);
+    TEST_ASSERT_EQUAL_STRING("https://fapi.binance.com/fapi/v1/premiumIndex?symbol=BTCUSDT", p.url_funding);
+    TEST_ASSERT_EQUAL_STRING("$.lastFundingRate", p.path_funding);
+    TEST_ASSERT_TRUE(p.https);
+    // USDS-M quarterly: the market carries the expiry, the label shows it instead of
+    // PERP, and there is no funding on a delivery contract (the age line stays)
+    TEST_ASSERT_TRUE(source_resolve(spec(SRC_PRESET_BINANCE_USDM, "BTC", "usdt_261225"), &p));
+    TEST_ASSERT_EQUAL_STRING("https://fapi.binance.com/fapi/v1/ticker/24hr?symbol=BTCUSDT_261225", p.url);
+    TEST_ASSERT_EQUAL_STRING("BTC/USDT 261225 - Binance", p.label);
+    TEST_ASSERT_EQUAL_STRING("", p.url_funding);
+    TEST_ASSERT_EQUAL_STRING("", p.path_funding);
+    // COIN-M: dapi, array paths, the pair as one word
+    TEST_ASSERT_TRUE(source_resolve(spec(SRC_PRESET_BINANCE_COINM, "btc", "usd_perp"), &p));
+    TEST_ASSERT_EQUAL_STRING("https://dapi.binance.com/dapi/v1/ticker/24hr?symbol=BTCUSD_PERP", p.url);
+    TEST_ASSERT_EQUAL_STRING("$[0].lastPrice", p.path_price);
+    TEST_ASSERT_EQUAL_STRING("$[0].priceChangePercent", p.path_change);
+    TEST_ASSERT_EQUAL_STRING("BTCUSD PERP - Binance", p.label);
+    TEST_ASSERT_EQUAL_STRING("https://dapi.binance.com/dapi/v1/premiumIndex?symbol=BTCUSD_PERP", p.url_funding);
+    TEST_ASSERT_EQUAL_STRING("$[0].lastFundingRate", p.path_funding);
+    TEST_ASSERT_TRUE(source_resolve(spec(SRC_PRESET_BINANCE_COINM, "ETH", "USD_261225"), &p));
+    TEST_ASSERT_EQUAL_STRING("ETHUSD 261225 - Binance", p.label);
+    TEST_ASSERT_EQUAL_STRING("", p.url_funding);
+    // "_PERP" is not a date: the perpetual keeps its funding request
+    TEST_ASSERT_TRUE(source_resolve(spec(SRC_PRESET_BINANCE_COINM, "ETH", "USD_PERP"), &p));
+    TEST_ASSERT_EQUAL_STRING("https://dapi.binance.com/dapi/v1/premiumIndex?symbol=ETHUSD_PERP", p.url_funding);
+    // a user label wins; spot and custom have no funding request
+    SourceSpec s = spec(SRC_PRESET_BINANCE_USDM, "BTC", "USDT");
+    snprintf(s.label, sizeof(s.label), "%s", "BTC perp");
+    TEST_ASSERT_TRUE(source_resolve(s, &p));
+    TEST_ASSERT_EQUAL_STRING("BTC perp", p.label);
+    TEST_ASSERT_TRUE(source_resolve(spec(SRC_PRESET_BINANCE, "BTC", "USDT"), &p));
+    TEST_ASSERT_EQUAL_STRING("", p.url_funding);
+    TEST_ASSERT_TRUE(source_resolve(custom_paths("$.a", nullptr), &p));
+    TEST_ASSERT_EQUAL_STRING("", p.url_funding);
+}
+
 void test_resolve_coingecko_lower_cases_and_paths_carry_market(void) {
     SourcePlan p;
     TEST_ASSERT_TRUE(source_resolve(spec(SRC_PRESET_COINGECKO, "Bitcoin", "USD"), &p));
@@ -221,6 +268,65 @@ void test_extract_binance(void) {
     TEST_ASSERT_EQUAL_INT(1, r.dir);
     TEST_ASSERT_FLOAT_WITHIN(0.01f, 84000.06f, r.price_f);
     TEST_ASSERT_EQUAL_UINT8(0, r.spark_n);
+}
+
+void test_extract_binance_futures(void) {
+    SourceResult r;
+    TEST_ASSERT_EQUAL(SRC_OK, run(spec(SRC_PRESET_BINANCE_USDM, "BTC", "USDT"), FIX_BINANCE_USDM, &r));
+    TEST_ASSERT_EQUAL_STRING("83 597.90", r.price);
+    TEST_ASSERT_EQUAL_STRING("-0.45%", r.change);
+    TEST_ASSERT_EQUAL_INT(-1, r.dir);
+    TEST_ASSERT_EQUAL_STRING("", r.funding);          // extract() never fills it: the second request does
+    TEST_ASSERT_EQUAL(SRC_OK, run(spec(SRC_PRESET_BINANCE_COINM, "BTC", "USD_PERP"), FIX_BINANCE_COINM, &r));
+    TEST_ASSERT_EQUAL_STRING("83 561.60", r.price);
+    TEST_ASSERT_EQUAL_STRING("-0.47%", r.change);
+    TEST_ASSERT_EQUAL_INT(-1, r.dir);
+    // Binance's answers to an unknown contract: "{}" and the error object are price-path errors
+    TEST_ASSERT_EQUAL(SRC_ERR_PRICE_PATH, run(spec(SRC_PRESET_BINANCE_USDM, "BTC", "USDT_991231"), FIX_BINANCE_EMPTY, &r));
+    TEST_ASSERT_EQUAL(SRC_ERR_PRICE_PATH, run(spec(SRC_PRESET_BINANCE_USDM, "FOO", "BAR"), FIX_BINANCE_ERR, &r));
+    // the COIN-M paths on an object body (a fapi answer fed to the dapi preset) miss as well
+    TEST_ASSERT_EQUAL(SRC_ERR_PRICE_PATH, run(spec(SRC_PRESET_BINANCE_COINM, "BTC", "USD_PERP"), FIX_BINANCE_USDM, &r));
+}
+
+void test_format_funding(void) {
+    char out[TICKER_TIME_MAX];
+    TEST_ASSERT_TRUE(source_format_funding(0.0001f, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR +0.0100%", out);
+    TEST_ASSERT_TRUE(source_format_funding(-0.00012345f, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR -0.0123%", out);      // rounded half away from zero on the 4th digit
+    TEST_ASSERT_TRUE(source_format_funding(0.0f, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR +0.0000%", out);      // the sign is always there
+    TEST_ASSERT_TRUE(source_format_funding(0.00004183f, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR +0.0042%", out);
+    TEST_ASSERT_TRUE(source_format_funding(0.0075f, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR +0.7500%", out);      // Binance's cap
+    TEST_ASSERT_TRUE(source_format_funding(5.0f, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR +9.9999%", out);      // clamped, still 11 characters
+    TEST_ASSERT_TRUE(source_format_funding(-5.0f, out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR -9.9999%", out);
+    TEST_ASSERT_TRUE(strlen(out) < TICKER_TIME_MAX);
+    TEST_ASSERT_FALSE(source_format_funding(0.0001f, out, 8));   // too small a buffer
+}
+
+void test_extract_funding_object_array_and_errors(void) {
+    char out[TICKER_TIME_MAX];
+    TEST_ASSERT_EQUAL(SRC_OK, source_extract_funding(FIX_BINANCE_USDM_PREMIUM, strlen(FIX_BINANCE_USDM_PREMIUM), "$.lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR +0.0042%", out);
+    TEST_ASSERT_EQUAL(SRC_OK, source_extract_funding(FIX_BINANCE_COINM_PREMIUM, strlen(FIX_BINANCE_COINM_PREMIUM), "$[0].lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR +0.0083%", out);
+    // a JSON number instead of a string works too
+    static const char num[] = "{\"lastFundingRate\":-0.0005}";
+    TEST_ASSERT_EQUAL(SRC_OK, source_extract_funding(num, strlen(num), "$.lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("FR -0.0500%", out);
+    // errors leave "" behind: missing field, not a number, not JSON, empty, array path on an object
+    TEST_ASSERT_EQUAL(SRC_ERR_PRICE_PATH, source_extract_funding(FIX_BINANCE_ERR, strlen(FIX_BINANCE_ERR), "$.lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("", out);
+    static const char bad[] = "{\"lastFundingRate\":\"n/a\"}";
+    TEST_ASSERT_EQUAL(SRC_ERR_PRICE_NUM, source_extract_funding(bad, strlen(bad), "$.lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL(SRC_ERR_JSON, source_extract_funding("<html>", 6, "$.lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL(SRC_ERR_EMPTY, source_extract_funding("", 0, "$.lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL(SRC_ERR_PRICE_PATH, source_extract_funding(FIX_BINANCE_USDM_PREMIUM, strlen(FIX_BINANCE_USDM_PREMIUM), "$[0].lastFundingRate", out, sizeof(out)));
+    TEST_ASSERT_EQUAL_STRING("", out);
 }
 
 void test_extract_coingecko_numbers_and_first_key(void) {
@@ -372,11 +478,15 @@ int main(int, char**) {
     RUN_TEST(test_format_rejects_non_numbers_and_small_buffers);
     RUN_TEST(test_format_pct_sign_and_direction);
     RUN_TEST(test_resolve_binance_upper_cases_symbol);
+    RUN_TEST(test_resolve_binance_futures_urls_labels_and_funding);
     RUN_TEST(test_resolve_coingecko_lower_cases_and_paths_carry_market);
     RUN_TEST(test_resolve_kraken_open_mode_and_custom_label);
     RUN_TEST(test_resolve_custom_expands_placeholders_and_validates);
     RUN_TEST(test_resolve_rejects_overlong_expansion);
     RUN_TEST(test_extract_binance);
+    RUN_TEST(test_extract_binance_futures);
+    RUN_TEST(test_format_funding);
+    RUN_TEST(test_extract_funding_object_array_and_errors);
     RUN_TEST(test_extract_coingecko_numbers_and_first_key);
     RUN_TEST(test_extract_json_number_is_the_parsed_float);
     RUN_TEST(test_extract_kraken_change_from_open);

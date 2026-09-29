@@ -34,7 +34,13 @@
 // others record the editor's choice (docs/WEB_UI.md "Change what a device shows").
 enum SourceKind : uint8_t { SRC_KIND_NONE = 0, SRC_KIND_TEXT, SRC_KIND_URL, SRC_KIND_MQTT, SRC_KIND_TICKER };
 // Preset = URL template + paths + change mode (firmware table, source.cpp).
-enum SourcePreset : uint8_t { SRC_PRESET_COINGECKO = 0, SRC_PRESET_KRAKEN, SRC_PRESET_BINANCE, SRC_PRESET_CUSTOM, SRC_PRESET_COUNT };
+// The two Binance futures presets (USDS-M on fapi, COIN-M on dapi - docs/TICKERS.md
+// "Binance futures") add a second request for the funding rate, shown in place of the age line.
+enum SourcePreset : uint8_t {
+    SRC_PRESET_COINGECKO = 0, SRC_PRESET_KRAKEN, SRC_PRESET_BINANCE,
+    SRC_PRESET_BINANCE_USDM, SRC_PRESET_BINANCE_COINM,
+    SRC_PRESET_CUSTOM, SRC_PRESET_COUNT
+};
 // How `path_change` is read: a percentage, or the open price the change is computed from.
 enum SourceChangeMode : uint8_t { SRC_CHG_PCT = 0, SRC_CHG_OPEN = 1 };
 // Thousands separator of the price. The e-ink fonts are ASCII only, so the
@@ -76,6 +82,11 @@ struct SourcePlan {
     uint8_t sep;
     char    label[SRC_LABEL_MAX];
     bool    https;
+    // Second request of the futures presets: the funding rate ("" = none).
+    // Same host and scheme as `url`; fetched after the price, its failure
+    // does not fail the fetch (the line keeps its last text).
+    char    url_funding[SRC_URL_MAX];
+    char    path_funding[SRC_PATH_MAX];
 };
 
 // Fills the defaults of a spec (CoinGecko, auto decimals, space separator).
@@ -93,6 +104,7 @@ struct SourceResult {
     float     price_f;                     // for the sparkline history
     uint8_t   spark_n;                     // points from path_spark (custom), else 0
     float     spark[TICKER_SPARK_MAX];
+    char      funding[TICKER_TIME_MAX];    // "FR +0.0100%" (futures presets), "" = none / not fetched
 };
 
 enum SourceError : uint8_t {
@@ -110,6 +122,15 @@ enum SourceError : uint8_t {
 // document, the existing ArduinoJson reader instantiation, no recursion.
 SourceError source_extract(const char* json, size_t len, const SourcePlan& p, SourceResult* out);
 const char* source_error_str(SourceError e);   // short, for last_error / the Test button
+
+// The funding-rate body (Binance premiumIndex: an object on fapi, a one-element
+// array on dapi) -> the ticker's time line, "FR +0.0100%": the rate is a
+// fraction (0.0001 = 0.01 %), shown as a percentage with 4 fraction digits
+// and an explicit sign (also "+0.0000%"); clamped to +-9.9999 %. `out` gets ""
+// and an error when the body is not JSON, `path` finds nothing or not a number.
+SourceError source_extract_funding(const char* json, size_t len, const char* path, char* out, size_t n);
+// Pure piece of the above: fraction -> "FR +0.0100%" text. False when `n` is too small.
+bool source_format_funding(float rate, char* out, size_t n);
 
 // --- pure pieces --------------------------------------------------------
 // Decimal text -> float without strtod ("84000.06", "-0.5", " 12"); false on

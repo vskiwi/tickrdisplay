@@ -13,6 +13,12 @@
 // slugs, Binance symbols upper-case; Kraken accepts either).
 // ---------------------------------------------------------------------------
 enum { FOLD_NONE = 0, FOLD_LOWER, FOLD_UPPER };
+// Label shapes: "<s>/<m> - <Name>" (spot), or the futures contract - the
+// market split at '_' into base and tail ("USDT" -> "USDT PERP",
+// "USDT_261225" -> "USDT 261225"; COIN-M "USD_PERP" -> "USD PERP"), joined
+// with '/' on USDS-M ("BTC/USDT PERP - Binance") and directly on COIN-M
+// ("BTCUSD PERP - Binance"), where the pair is written as one word.
+enum { LABEL_SPOT = 0, LABEL_FUT_SLASH, LABEL_FUT_JOINED };
 struct PresetDef {
     const char* name;
     const char* url;
@@ -20,18 +26,29 @@ struct PresetDef {
     const char* p_change;
     uint8_t     change_mode;
     uint8_t     fold;
+    uint8_t     label;
+    const char* url_funding;   // nullptr = no second request
+    const char* p_funding;
 };
 static const PresetDef kPresets[SRC_PRESET_CUSTOM] = {
     {"CoinGecko", "https://api.coingecko.com/api/v3/simple/price?ids={s}&vs_currencies={m}&include_24hr_change=true",
-     "$.*.{m}", "$.*.{m}_24h_change", SRC_CHG_PCT, FOLD_LOWER},
+     "$.*.{m}", "$.*.{m}_24h_change", SRC_CHG_PCT, FOLD_LOWER, LABEL_SPOT, nullptr, nullptr},
     {"Kraken",    "https://api.kraken.com/0/public/Ticker?pair={s}{m}",
-     "$.result.*.c[0]", "$.result.*.o", SRC_CHG_OPEN, FOLD_NONE},
+     "$.result.*.c[0]", "$.result.*.o", SRC_CHG_OPEN, FOLD_NONE, LABEL_SPOT, nullptr, nullptr},
     {"Binance",   "https://api.binance.com/api/v3/ticker/24hr?symbol={s}{m}",
-     "$.lastPrice", "$.priceChangePercent", SRC_CHG_PCT, FOLD_UPPER},
+     "$.lastPrice", "$.priceChangePercent", SRC_CHG_PCT, FOLD_UPPER, LABEL_SPOT, nullptr, nullptr},
+    // USDS-M futures (fapi): objects like spot; market "USDT" = perpetual, "USDT_261225" = quarterly.
+    {"Binance",   "https://fapi.binance.com/fapi/v1/ticker/24hr?symbol={s}{m}",
+     "$.lastPrice", "$.priceChangePercent", SRC_CHG_PCT, FOLD_UPPER, LABEL_FUT_SLASH,
+     "https://fapi.binance.com/fapi/v1/premiumIndex?symbol={s}{m}", "$.lastFundingRate"},
+    // COIN-M futures (dapi): one-element arrays; market "USD_PERP" or "USD_261225".
+    {"Binance",   "https://dapi.binance.com/dapi/v1/ticker/24hr?symbol={s}{m}",
+     "$[0].lastPrice", "$[0].priceChangePercent", SRC_CHG_PCT, FOLD_UPPER, LABEL_FUT_JOINED,
+     "https://dapi.binance.com/dapi/v1/premiumIndex?symbol={s}{m}", "$[0].lastFundingRate"},
 };
 
 static const char* const kKind[]   = {"none", "text", "url", "mqtt", "ticker"};
-static const char* const kPreset[] = {"coingecko", "kraken", "binance", "custom"};
+static const char* const kPreset[] = {"coingecko", "kraken", "binance", "binance_usdm", "binance_coinm", "custom"};
 static const char* const kSep[]    = {"space", "comma", "none"};
 static const char* const kMode[]   = {"pct", "open"};
 
@@ -51,6 +68,8 @@ const char* source_sep_str(uint8_t v)          { return kSep[v < 3 ? v : 0]; }
 uint8_t     source_sep_parse(const char* s)    { return parse_enum(s, kSep, 3, SRC_SEP_SPACE); }
 const char* source_change_mode_str(uint8_t v)  { return kMode[v < 2 ? v : 0]; }
 uint8_t     source_change_mode_parse(const char* s) { return parse_enum(s, kMode, 2, SRC_CHG_PCT); }
+
+static bool is_digit(char c) { return c >= '0' && c <= '9'; }
 
 // bounded copy / append (strlcpy is not on every host libc)
 static void cpy(char* dst, size_t n, const char* src) {
@@ -110,6 +129,15 @@ bool source_resolve(const SourceSpec& s, SourcePlan* out) {
         if (!expand(d->url, sym, mkt, out->url, sizeof(out->url)) ||
             !expand(d->p_price, sym, mkt, out->path_price, sizeof(out->path_price)) ||
             !expand(d->p_change, sym, mkt, out->path_change, sizeof(out->path_change))) return false;
+        // Funding exists on perpetuals only: a market whose tail after '_' is a
+        // delivery date (digits) is a quarterly contract - no second request,
+        // the age line stays.
+        const char* tail = strchr(mkt, '_');
+        bool delivery = tail && tail[1];
+        for (const char* q = tail ? tail + 1 : ""; delivery && *q; q++) delivery = is_digit(*q);
+        if (d->url_funding && !delivery &&
+            (!expand(d->url_funding, sym, mkt, out->url_funding, sizeof(out->url_funding)) ||
+             !expand(d->p_funding, sym, mkt, out->path_funding, sizeof(out->path_funding)))) return false;
         out->change_mode = d->change_mode;
     } else {
         if (!s.url[0] || !s.path_price[0]) return false;
@@ -122,6 +150,18 @@ bool source_resolve(const SourceSpec& s, SourcePlan* out) {
     out->https = strncasecmp(out->url, "https://", 8) == 0;
     if (s.label[0]) {
         cpy(out->label, sizeof(out->label), s.label);
+    } else if (d && d->label != LABEL_SPOT) {
+        // Futures: "<s>/<base> <tail> - Binance" / "<s><base> <tail> - Binance", tail = "PERP" without one
+        char* tail = strchr(mkt, '_');
+        if (tail) *tail++ = '\0';
+        out->label[0] = '\0';
+        cat(out->label, sizeof(out->label), sym);
+        if (mkt[0] && d->label == LABEL_FUT_SLASH) cat(out->label, sizeof(out->label), "/");
+        cat(out->label, sizeof(out->label), mkt);
+        cat(out->label, sizeof(out->label), " ");
+        cat(out->label, sizeof(out->label), tail && *tail ? tail : "PERP");
+        cat(out->label, sizeof(out->label), " - ");
+        cat(out->label, sizeof(out->label), d->name);
     } else if (d) {
         // "<symbol>/<market> - <Preset>", truncated to the label field
         out->label[0] = '\0';
@@ -139,8 +179,6 @@ bool source_resolve(const SourceSpec& s, SourcePlan* out) {
 // ---------------------------------------------------------------------------
 // Numbers - no strtod (it would link 10 KB of libc)
 // ---------------------------------------------------------------------------
-static bool is_digit(char c) { return c >= '0' && c <= '9'; }
-
 bool source_parse_num(const char* s, float* out) {
     if (!s || !out) return false;
     while (*s == ' ') s++;
@@ -348,6 +386,36 @@ SourceError source_extract(const char* json, size_t len, const SourcePlan& p, So
             }
         }
     }
+    return SRC_OK;
+}
+
+bool source_format_funding(float rate, char* out, size_t n) {
+    if (!out || n == 0) return false;
+    if (!isfinite(rate)) rate = 0.0f;
+    float pct = rate * 100.0f;
+    if (pct > 9.9999f) pct = 9.9999f;
+    if (pct < -9.9999f) pct = -9.9999f;
+    // x 10 000 stays exact enough in a float for 4 fraction digits of a value < 10
+    long c = (long)(pct * 10000.0f + (pct >= 0 ? 0.5f : -0.5f));
+    long a = c < 0 ? -c : c;
+    int w = snprintf(out, n, "FR %c%ld.%04ld%%", c < 0 ? '-' : '+', a / 10000, a % 10000);
+    return w > 0 && (size_t)w < n;
+}
+
+SourceError source_extract_funding(const char* json, size_t len, const char* path, char* out, size_t n) {
+    if (!out || n == 0) return SRC_ERR_NOMEM;
+    out[0] = '\0';
+    if (!json || len == 0) return SRC_ERR_EMPTY;
+    if (len > PAYLOAD_MAX_LEN || !path || !path[0]) return SRC_ERR_JSON;
+    DynamicJsonDocument doc(PAYLOAD_JSON_DOC);
+    if (doc.capacity() == 0) return SRC_ERR_NOMEM;
+    if (deserializeJson(doc, json, len) != DeserializationError::Ok) return SRC_ERR_JSON;
+    JsonVariantConst v = jpath(doc.as<JsonVariantConst>(), path);
+    if (v.isNull()) return SRC_ERR_PRICE_PATH;
+    char num[SRC_NUM_MAX];
+    float rate;
+    if (!variant_text(v, num, sizeof(num)) || !source_parse_num(num, &rate)) return SRC_ERR_PRICE_NUM;
+    if (!source_format_funding(rate, out, n)) { out[0] = '\0'; return SRC_ERR_NOMEM; }
     return SRC_OK;
 }
 

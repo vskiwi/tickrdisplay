@@ -1275,6 +1275,26 @@ bool ConnectivityManager::fetch_source(const SourcePlan& plan, bool custom, Sour
                     setLastError(err);
                 }
             }
+            // Funding rate of the futures presets (docs/TICKERS.md "Binance futures"): a
+            // second GET after the price, on its own TLS client (the server closes
+            // the first connection; sequential, so the heap peak is that of one
+            // handshake). Its failure is logged, never a failed fetch: the frame
+            // keeps the last funding text (fetch_ticker). The task watchdog is fed in
+            // between - two bounded GETs may take longer than one.
+            if (ok && plan.url_funding[0]) {
+                esp_task_wdt_reset();
+                delete pc.secure;
+                pc.secure = nullptr;
+                pc.client = &pc.plain;
+                if (open_client(pc, plan.https, custom ? TLS_USER_OR_BUNDLE : TLS_BUNDLE) &&
+                    http_get_body(*pc.client, plan.url_funding, buf, &got)) {
+                    SourceError e = source_extract_funding(buf, got, plan.path_funding, res->funding, sizeof(res->funding));
+                    if (e != SRC_OK) Serial.printf("Ticker: funding - %s\n", source_error_str(e));
+                } else {
+                    Serial.printf("Ticker: funding - %s\n", _last_error);
+                }
+                if (strncmp(_last_error, "pull:", 5) == 0) _last_error[0] = '\0';   // the price succeeded
+            }
             free(buf);
         }
     }
@@ -1282,6 +1302,11 @@ bool ConnectivityManager::fetch_source(const SourcePlan& plan, bool custom, Sour
     if (ms) *ms = millis() - t0;
     return ok;
 }
+
+// The last funding text per source (RTC memory, so a battery device keeps
+// it across deep sleep): shown again when the second request fails.
+RTC_DATA_ATTR static char     s_funding_last[TICKER_TIME_MAX] = "";
+RTC_DATA_ATTR static uint32_t s_funding_key = 0;
 
 bool ConnectivityManager::fetch_ticker() {
     SourcePlan plan;
@@ -1316,6 +1341,18 @@ bool ConnectivityManager::fetch_ticker() {
             p->dir = res->dir;
         }
         p->has_age = true;   // age_s = 0: the quote is as old as the frame
+        // Futures: the funding rate takes the age line's place (payload `time`);
+        // a missed second request shows the previous text of the same source.
+        if (plan.url_funding[0]) {
+            uint32_t key = spark_hist_key(plan.url_funding);
+            if (res->funding[0]) {
+                strlcpy(s_funding_last, res->funding, sizeof(s_funding_last));
+                s_funding_key = key;
+            } else if (s_funding_key != key) {
+                s_funding_last[0] = '\0';
+            }
+            strlcpy(p->time, s_funding_last, sizeof(p->time));
+        }
         // Sparkline: the source's own series (custom path) when it has one,
         // else the device history - min-max scaled by the ticker drawing code.
         spark_hist_push(&s_spark, spark_hist_key(plan.url), res->price_f);
@@ -1377,10 +1414,13 @@ void ConnectivityManager::run_source_test() {
     uint32_t ms = 0;
     bool ok = WiFi.isConnected() && fetch_source(_test_plan, _test_custom, res, err, sizeof(err), &ms);
     // strings are quote-free by validation (label, url) or by construction (price, change, error)
-    char body[SRC_URL_MAX + SRC_LABEL_MAX + SRC_PRICE_MAX + TICKER_CHANGE_MAX + 96];
+    char body[SRC_URL_MAX + SRC_LABEL_MAX + SRC_PRICE_MAX + TICKER_CHANGE_MAX + TICKER_TIME_MAX + 112];
     if (ok) {
-        snprintf(body, sizeof(body), "{\"ok\":true,\"price\":\"%s\",\"change\":\"%s\",\"dir\":%d,\"label\":\"%s\",\"url\":\"%s\",\"ms\":%lu}",
-                 res->price, res->change, (int)res->dir, _test_plan.label, _test_plan.url, (unsigned long)ms);
+        // "funding" only for the futures presets: "" = the second request failed
+        char funding[TICKER_TIME_MAX + 16] = "";
+        if (_test_plan.url_funding[0]) snprintf(funding, sizeof(funding), ",\"funding\":\"%s\"", res->funding);
+        snprintf(body, sizeof(body), "{\"ok\":true,\"price\":\"%s\",\"change\":\"%s\",\"dir\":%d,\"label\":\"%s\",\"url\":\"%s\"%s,\"ms\":%lu}",
+                 res->price, res->change, (int)res->dir, _test_plan.label, _test_plan.url, funding, (unsigned long)ms);
     } else {
         // the test's own failure must not linger as the device's last_error
         if (strncmp(_last_error, "pull:", 5) == 0) _last_error[0] = '\0';
