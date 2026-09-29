@@ -58,10 +58,9 @@ You need: the device on **USB power**, a laptop or phone with Wi-Fi, and a way t
 1. **Get the firmware** – download `tickrdisplay-<version>.bin` from the [latest release](https://github.com/vskiwi/tickrdisplay/releases) (check the SHA-256 in the release notes), or build it yourself (`cd tickr_display && pio run` → `dist/tickrdisplay-<version>.bin`).
 2. **Open the stock update page** – make your Wi-Fi unreachable, power-cycle the device with the switch on the back, join the open access point **`TickrMeter`** and open **`http://192.168.4.1/update`** in a *regular browser tab* (not the captive-portal pop-up – uploads fail there).
 3. **Upload** `tickrdisplay-<version>.bin` and press *Update* (1–3 min, no progress bar). The device reboots into TickrDisplay; the stock firmware stays in the other slot.
-   Command-line alternative: `scripts/flash_ota.sh 192.168.4.1 tickrdisplay-<version>.bin --stock`
 4. **Restore your Wi-Fi.** The device normally rejoins with the saved credentials. If the e-ink shows *Wi-Fi setup*, join the open access point **`TickrDisplay`** and open `http://192.168.244.1` (most phones open it by themselves), pick your network, *Connect*.
-5. **Back up the stock firmware** while it is still in the other slot: `scripts/backup_device.sh <device-ip>`.
-6. **Open `http://<device-ip>/`** – accept *Protect this device* (generates an API token, shown once), click the card → *Change…* → *Ticker* → CoinGecko / Kraken / Binance → symbol → *Test* → *Save*.
+5. **Open `http://<device-ip>/`** – accept *Protect this device* (generates an API token, shown once), click the card → *Change…* → *Ticker* → CoinGecko / Kraken / Binance → symbol → *Test* → *Save*.
+6. **Back up the stock firmware** while it is still in the other slot: `/system` → *Firmware* shows the *Running slot*; download the *other* one from the address bar as described in [`docs/FLASHING.md`](docs/FLASHING.md#3-back-up-the-stock-firmware) (the browser asks for the token). The second TickrDisplay update overwrites that slot.
 
 Or push something right away:
 
@@ -139,11 +138,12 @@ Threat model, hardening tips and how to report a vulnerability: **[`SECURITY.md`
 
 ## Updating and going back to stock
 
-* **Browser:** `http://<device-ip>/system#firmware` → choose `.bin` → *Upload & flash*. **Shell:** `scripts/flash_ota.sh <device-ip> firmware.bin` or `curl -u :<token> -F "update=@firmware.bin" http://<device-ip>/update`. **From a URL:** `POST /api/system/update_from_url {"url":"http://<host>/firmware.bin"}` (plain HTTP).
-* Images go to the inactive OTA slot; an image that crashes before it confirms itself is rolled back by the bootloader. The **second** update overwrites the stock slot – back it up first (`scripts/backup_device.sh`).
-* **Back to stock:** *Boot other partition* on `/system` → *Firmware* → *Recovery* (or `POST /api/system/boot_partition {"label":"app0"}`) while the stock image is still there; otherwise upload the vendor's recovery image through `/system#firmware`; last resort: UART.
+* **Update in the browser:** `http://<device-ip>/system#firmware` – note the *Version*, *Running slot* and *MD5* shown there, choose the new `tickrdisplay-<version>.bin` → *Upload & flash* → confirm; the page shows the progress and reloads after the reboot with the new version and the other slot running.
+* **Two slots:** the image goes to the inactive slot, the firmware you were running stays in the other one; an image that crashes before it confirms itself is rolled back by the bootloader. The **second** update overwrites what the first left there – back up the stock firmware first (quick start, step 6). Keep the downloaded release files: they are your way back when the other slot has been overwritten.
+* **Back to the previous firmware or to stock:** `/system` → *Firmware* → *Recovery* → *Boot other partition* (nothing is flashed; the button names the slot). Otherwise upload the saved previous image or the vendor's recovery image on the same page. Without token or network: recovery mode. Last resort: UART.
+* **Terminals and scripts** (macOS/Linux `bash`, Windows PowerShell, plain `curl`, fetch from a URL) are optional and collected in [`docs/FLASHING.md` → *Command-line tools*](docs/FLASHING.md#7-command-line-tools-optional).
 
-Everything about slots, backups, UART and risks: **[`docs/FLASHING.md`](docs/FLASHING.md)**.
+Step by step, how to tell the old image from the new one, slots, backups, UART and risks: **[`docs/FLASHING.md`](docs/FLASHING.md)**.
 
 ## Troubleshooting
 
@@ -182,7 +182,7 @@ Everything below exists in the firmware and is covered by host tests where a pur
 * **Battery life and deep sleep** – the full deep-sleep cycle on the cell with the current power detector, deep-sleep current and battery life are not measured; the ticker on a battery device (one fetch per wake, the sparkline history surviving deep sleep) is host-tested only ([`docs/HARDWARE.md`](docs/HARDWARE.md), [`docs/TICKERS.md`](docs/TICKERS.md)).
 * **Runtime USB → battery switch** – cable pulled from an awake unit: the *On battery* card, the 2-min grace and the restart into the battery flow; likewise the partial-refresh battery wake ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
 * **Low-battery screens** – the BATTERY LOW badge and the BATTERY EMPTY card have never been seen on the e-ink ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
-* **Offline card** – the *No Wi-Fi* card after 10 min without the router and the restore after the link holds again ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
+* **Offline card and link supervisor** – the *No Wi-Fi* card after 10 min without the router, the restore after the link holds again, the firmware's own reconnect attempts and the restart after 30 min offline have not been run as a staged router outage on the bench ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
 * **Voltage readings** – the ADC divider ratios on GPIO 32/33 are fitted, not multimeter-checked, and may be off by up to ≈ 10 % (`adc_cell_num/den` is a setting for that reason); a rev B unit on the stacking pads with a full cell has not been tried ([`docs/HARDWARE.md`](docs/HARDWARE.md)).
 * **Failing ticker sources** – the back-off sequence and the *stale N min* line on a dead or rate-limited source, and the Binance `http 451` geo-block from a blocked region ([`docs/TICKERS.md`](docs/TICKERS.md)).
 * **Sleeping group members** – the sleeper flow end to end (wake-up beacon, relay lookup, signed fetch, parked payload, frame upload, *asleep* / *pending* badges) and the pairing refusal on a real battery-powered device ([`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md)).
@@ -192,6 +192,7 @@ Everything below exists in the firmware and is covered by host tests where a pur
 * **Real phones** – touch drag, bottom sheets and the captive-portal sheet opening `/wifi` by itself; the recovery actions from a phone joined to the `TickrDisplay` access point; the battery-power recovery frames ([`docs/WEB_UI.md`](docs/WEB_UI.md)).
 * **Device sheet write actions with a token** – *Change…* → Send / Save, *Rename*, *Move*, *Clear pending*, *Test LED & sound*, *Forget* ([`docs/WEB_UI.md`](docs/WEB_UI.md)); cosmetic judgements of the LED breathe / amber tint and the optional double full refresh after a long-lived card ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
 * **Other hardware** – board revisions other than A and B are unknown; open an issue with `esptool.py flash_id` and `/api/power/raw` if yours differs.
+* **Windows upload script** – `scripts/flash_ota.ps1` has not been run on a Windows machine; the browser upload is the supported path ([`docs/FLASHING.md`](docs/FLASHING.md)).
 
 Scenarios that need a person at the device are collected in [`docs/MANUAL_TESTS.md`](docs/MANUAL_TESTS.md).
 

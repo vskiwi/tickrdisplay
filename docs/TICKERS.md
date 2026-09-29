@@ -29,6 +29,36 @@ no server of your own. The payload fields a proxy can send (`change`, `dir`,
 | **CoinGecko** | `api.coingecko.com/api/v3/simple/price?ids={s}&vs_currencies={m}&include_24hr_change=true` – both folded to lower case | coin **id** (`bitcoin`, `ethereum`, `solana`) · `usd`, `eur` | `$.*.{m}` · `$.*.{m}_24h_change` (a percentage) | GTS Root R4, cross-signed by GlobalSign Root CA |
 | **Kraken** | `api.kraken.com/0/public/Ticker?pair={s}{m}` – case as typed | `XBT`, `ETH` · `USD`, `EUR` | `$.result.*.c[0]` (last) · `$.result.*.o` (open – change = `(last − open) / open`) | GTS Root R4, cross-signed by GlobalSign Root CA |
 | **Binance** | `api.binance.com/api/v3/ticker/24hr?symbol={s}{m}` – folded to upper case | `BTC`, `ETH` · `USDT`, `BTC` | `$.lastPrice` · `$.priceChangePercent` | DigiCert Global Root G2 |
+| **Binance USDⓈ-M futures** | `fapi.binance.com/fapi/v1/ticker/24hr?symbol={s}{m}` – upper case; plus `fapi/v1/premiumIndex?symbol={s}{m}` on a perpetual | `BTC`, `ETH` · `USDT` (perpetual), `USDT_261225` (quarterly, expiry as YYMMDD) | `$.lastPrice` · `$.priceChangePercent`; funding `$.lastFundingRate` | DigiCert Global Root G2 |
+| **Binance COIN-M futures** | `dapi.binance.com/dapi/v1/ticker/24hr?symbol={s}{m}` – upper case; plus `dapi/v1/premiumIndex?symbol={s}{m}` on a perpetual | `BTC`, `ETH` · `USD_PERP` (perpetual), `USD_261225` (quarterly) | `$[0].lastPrice` · `$[0].priceChangePercent` (one-element arrays); funding `$[0].lastFundingRate` | DigiCert Global Root G2 |
+
+### Binance futures
+
+The two futures presets are the spot preset on the futures hosts, with two
+differences:
+
+* **The funding rate replaces the age line.** After the price the device
+  makes a second request (`premiumIndex`) and draws `lastFundingRate` as a
+  percentage with four fraction digits and an explicit sign in the age
+  line's place: **`FR +0.0100%`** (`0.0001` from the API = 0.01 %; clamped to
+  ±9.9999 %). If the second request fails the price still counts as a
+  successful fetch and the line keeps the last funding text of the same
+  contract – empty before the first success, in which case the age line is
+  drawn as usual. With the funding line up there is no *stale N min*
+  marker on the frame; `stale_s` in `/api/screen/state` still counts, and
+  the OFFLINE card keeps its *last update N min ago* line.
+* **Quarterly (delivery) contracts have no funding.** A market whose tail
+  after `_` is a date (`USDT_261225`, `USD_261225`) skips the second request
+  and keeps the age line. Contract codes come from Binance's exchange
+  information; an expired one answers `{}` (fapi) or an error object, shown
+  as `price path`.
+* **Label**: `<symbol>/<market> PERP - Binance` or `<symbol>/<market>
+  <date> - Binance` on USDⓈ-M (`BTC/USDT PERP - Binance`, `BTC/USDT 261225 -
+  Binance`); COIN-M writes the pair as one word (`BTCUSD PERP - Binance`,
+  `ETHUSD 261225 - Binance`). Your own label under *Advanced* wins.
+* Two requests per refresh (Binance weight 1 each, limit 2 400 per minute
+  on the futures hosts); on battery the second TLS handshake adds one to
+  two seconds of awake time. The same `http 451` geo-block as spot applies.
 
 Caveats:
 
@@ -84,7 +114,8 @@ badges in the corner ([`DEVICE_UI.md`](DEVICE_UI.md) → *Card texts and
 layout notes*).
 
 * **Label**: `<symbol>/<market> - <Preset>` (`BTC/USDT - Binance`,
-  `bitcoin/usd - CoinGecko`), or your own text (≤ 31 chars).
+  `bitcoin/usd - CoinGecko`; the futures shapes are under *Binance
+  futures*), or your own text (≤ 31 chars).
 * **Price**: rounded half-up to *auto* decimals – **0** from 1 000 000,
   **2** from 1, **4** from 0.01, else **6** – or a fixed 0–6; a thousands
   separator every three digits: **space** (`84 000.06`, the default – the
@@ -101,7 +132,8 @@ layout notes*).
   `3 d ago`, counted from the fetch. Past **T_stale** = 3 × the refresh
   interval (at least 10 min) it reads **`stale 40 min`** / `stale 3 h` and
   earns one refresh of its own, so a dead source is visible without waiting
-  for other content. A proxy's `time` string is shown verbatim instead.
+  for other content. A proxy's `time` string is shown verbatim instead, and
+  so is the funding line of a Binance perpetual (`FR +0.0100%`).
 
 ## 5. Sparkline history
 
@@ -172,15 +204,20 @@ checked for expiry on the device. Fingerprints: [`SECURITY.md`](../SECURITY.md).
 
 Shelf page (`/`) → click the device → **Content…** → *Source* = **Ticker**:
 
-1. **Market**: CoinGecko · Kraken · Binance · Custom JSON – the fields show
-   that preset's placeholders and a one-line hint with the API's limits.
-2. **Symbol** and **market**; *Custom JSON* adds URL, price path, change
+1. **Market**: CoinGecko · Kraken · Binance · Binance USDⓈ-M futures ·
+   Binance COIN-M futures · Custom JSON – the fields show that preset's
+   placeholders and a one-line hint with the API's limits.
+2. **Symbol** and **market**; the futures presets take the contract in the
+   market field (`USDT` / `USD_PERP` for the perpetual, `USDT_261225` /
+   `USD_261225` for a quarterly); *Custom JSON* adds URL, price path, change
    path, change mode and the optional history array path.
 3. **Every N minutes** – the refresh interval (pre-filled 5 for a device not
    yet on a ticker; a battery device shows the handshake hint).
 4. **Test** – one fetch on *that* device, nothing saved: `BTC/USDT -
-   Binance: 84 000.06  +0.07%  (812 ms)` or `Error: http 451`. The browser
-   cannot call the exchanges itself (CORS), the device can.
+   Binance: 84 000.06  +0.07%  (812 ms)` or `Error: http 451`; a futures
+   perpetual adds the funding line (`FR +0.0048%`, or *funding: n/a* when
+   only the second request failed). The browser cannot call the exchanges
+   itself (CORS), the device can.
 5. **Advanced** – label, decimals, thousands separator, **LED rule**.
 6. **Save** – the device fetches at once and the tile preview follows.
 

@@ -38,7 +38,8 @@ details in [`FLASHING.md`](FLASHING.md).
       `/system` → *Firmware* (device A). Boots, joins Wi-Fi, one payload
       renders, `/api/status` reports the new version.
 - [ ] **Update a second device from the first**: drawer → *Updates* →
-      *Update all members* (device B), or `scripts/flash_ota.sh`. Boots and
+      *Update all members* (device B), or one of the command-line tools
+      ([`FLASHING.md`](FLASHING.md) → *Command-line tools*). Boots and
       renders.
 - [ ] **Fresh-install path**: from the stock firmware via its `/update`
       page. Set-up portal appears, Wi-Fi connects, the shelf loads.

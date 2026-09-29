@@ -11,7 +11,7 @@ a device that no longer boots to a web page is the internal UART header.
 ## 1. How the two firmwares coexist
 
 The stock firmware is a plain Arduino-ESP32 application built with the standard Arduino
-`default.csv` partition layout (two 1.25 MB OTA slots `app0`/`app1`, [section 7](#7-stock-partition-table)).
+`default.csv` partition layout (two 1.25 MB OTA slots `app0`/`app1`, [section 8](#8-stock-partition-table)).
 Its Wi-Fi setup portal is [WiFiManager](https://github.com/tzapu/WiFiManager), which ships a firmware
 upload page at `http://192.168.4.1/update` (the vendor documents it in "How to force firmware update
 locally" on help.tickrmeter.com).
@@ -47,7 +47,7 @@ on the stock table; the build fails if it does not.
 ### 2a. Over Wi-Fi, without opening the case (recommended)
 
 You need: the device on **USB power** (do not do this on battery), a laptop/phone with Wi-Fi and
-`curl` or a browser, and a way to make your normal Wi-Fi *unavailable* to the device.
+a browser, and a way to make your normal Wi-Fi *unavailable* to the device.
 
 1. Make the device's known Wi-Fi network unreachable (turn off the access point, change its
    password temporarily, or move the device out of range). The stock firmware only opens its
@@ -57,13 +57,9 @@ You need: the device on **USB power** (do not do this on battery), a laptop/phon
 4. Open **`http://192.168.4.1/update`** in a *regular browser tab*. Do **not** use the captive
    portal pop-up that your OS may show – file uploads do not work from there (WiFiManager itself
    prints this warning). If the pop-up opens, close it and type the URL manually.
-5. Choose `firmware.bin` and press **Update**. The page shows no progress; the upload takes
-   1–3 minutes. The stock portal answers "Update successful. Device rebooting now..." and the
-   device restarts. Same thing from the command line (field name `update`, URL `/u`):
-
-   ```sh
-   scripts/flash_ota.sh 192.168.4.1 tickr_display/.pio/build/tickr/firmware.bin --stock
-   ```
+5. Choose `tickrdisplay-<version>.bin` and press **Update**. The page shows no progress; the
+   upload takes 1–3 minutes. The stock portal answers "Update successful. Device rebooting now..."
+   and the device restarts. (The same upload from a terminal: [section 7](#7-command-line-tools-optional).)
 
 6. Restore your Wi-Fi. TickrDisplay boots and reuses the Wi-Fi credentials the ESP32 Wi-Fi stack
    keeps in NVS, so it normally joins your network by itself (check your router for a new
@@ -111,63 +107,90 @@ Do this **immediately after the first boot of TickrDisplay**, before anything el
 is still sitting in the other OTA slot, and the `nvs` partition still contains the vendor device
 identity and the stock Wi-Fi credentials. Everything below is read-only.
 
-### 3a. One command
+### 3a. In the browser
 
-```sh
-scripts/backup_device.sh <device-ip>            # -> backup_<date>/
-```
+1. Open `http://<device-ip>/system#firmware`. The *Firmware* section shows **Running slot**
+   (`app0` or `app1`) – the *other* slot holds the stock firmware right after the first flash.
+   To be sure, open *Advanced* → **System info (JSON)** (`/api/system/info`): in `partitions[]`
+   the slot whose `description.idf_ver` is **v4.4.5** is the stock image (both images call
+   themselves `arduino-lib-builder`; TickrDisplay is built on IDF 4.4.7, and the descriptor date
+   is the Arduino core's build date, not the sketch's).
+2. Type `http://<device-ip>/api/system/partition/<slot>` (e.g. `.../partition/app0`) into the
+   address bar. The browser asks for a user name and password: **any user name, the API token as
+   the password**. The download `app0_0x010000.bin` (1.25 MB, the whole slot) starts.
+3. Do the same for `nvs` (vendor device identity, stock Wi-Fi credentials – keep it private) and
+   `otadata`. Keep the three files together; the address in the file name is where the data
+   came from.
 
-The script fetches `/api/system/info`, downloads every partition (`nvs`, `otadata`, `app0`, `app1`,
-`spiffs`, `coredump`, ...) as `<label>_0x<address>.bin`, writes `SHA256SUMS`, and prints a table of
-the app slots, e.g.
+A dumped app slot is a plain ESP32 application image. It can be uploaded through
+`/system#firmware` later (5b) or written back with `esptool.py write_flash 0x10000 app0_0x010000.bin`
+(address = the one in the file name); the trailing `0xFF` padding of the slot is harmless. On a
+**`tickr_dev` build** `http://<device-ip>/dev` (Diagnostics) has the same downloads as links per
+partition. The release image has no `/dev` page.
 
-```
-    LABEL    ADDRESS    SIZE      RUNNING  BOOT  OTA_STATE       IMAGE
-    app0     0x010000   1310720   -        -     valid           arduino-lib-builder v4.4.5 Jun 12 2023
-    app1     0x150000   1310720   RUNNING  BOOT  valid           arduino-lib-builder v4.4.7-dirty Mar  5 2024
-```
+### 3b. From a terminal
 
-The slot that is *not* RUNNING and reports IDF **v4.4.5 / Jun 12 2023** is the stock firmware (both
-images call themselves `arduino-lib-builder`; TickrDisplay is IDF 4.4.7 and the descriptor date is
-the Arduino core's build date, not the sketch's). If an API token is set, `export TICKR_API_TOKEN=<token>` first.
-
-### 3b. Manually
-
-On a **`tickr_dev` build** `http://<device-ip>/dev` (Diagnostics) has a **Download** link per
-partition (the page opens read-only without a token, the downloads need it). The release image
-has no `/dev` page, so there use curl (`-J -O` keeps the server-supplied file name):
-
-```sh
-curl -fSJO http://<device-ip>/api/system/partition/app0
-curl -fSJO http://<device-ip>/api/system/partition/nvs
-curl -fSJO http://<device-ip>/api/system/partition/otadata
-# raw flash, e.g. the whole 4 MB (bootloader + partition table + everything):
-curl -fSJO "http://<device-ip>/api/system/flash?offset=0&length=0x400000"
-```
-
-A dumped app slot is a plain ESP32 application image: `esptool.py image_info app0_0x010000.bin`
-prints a valid header; the file can later be uploaded through `/system#firmware` or written back
-with `esptool.py write_flash 0x10000 app0_0x010000.bin` (address = the one in the file name). The
-dump is the full 1.25 MB slot; the trailing `0xFF` padding is harmless.
+One command for every partition plus a table of the app slots, or single `curl` downloads:
+[section 7](#7-command-line-tools-optional).
 
 ## 4. Updating TickrDisplay
 
 Two paths, both over the normal home network (no AP mode needed): HTTP upload to `POST /update`
-from the *Firmware* section of `/system` or from the shell (4a, every build), and ArduinoOTA push
-from PlatformIO / `espota.py` (4b, **developer build `tickr_dev` only**).
+from the *Firmware* section of `/system` (4a, every build; the same upload from a terminal is in
+[section 7](#7-command-line-tools-optional)), and ArduinoOTA push from PlatformIO / `espota.py`
+(4b, **developer build `tickr_dev` only**).
 
-### 4a. HTTP upload (`/system#firmware`, `POST /update`)
+### 4a. In the browser (`/system#firmware`, `POST /update`)
 
-Browser: `http://<device-ip>/system#firmware` → choose the new `firmware.bin` → **Upload & flash**.
-The page shows upload progress, the result, and reloads after the reboot. The e-ink shows
-*Updating / keep the power on* and the LED is blue while flash is being written; an aborted upload
-restores the previous screen. (`GET /update` answers `301` to `/system#firmware`.)
+Everything happens on one page; you need the API token in that browser. Without it the page opens
+*read-only*: a bar at the top asks for the token, and the file chooser, *Upload & flash* and the
+*Recovery* buttons are greyed out until you enter it.
 
-```sh
-scripts/flash_ota.sh <device-ip> tickr_display/.pio/build/tickr/firmware.bin
-# or plain curl:
-curl -F "update=@tickr_display/.pio/build/tickr/firmware.bin" http://<device-ip>/update
-```
+1. **Open** `http://<device-ip>/` → ⚙ (*System*) → **Firmware**, or `http://<device-ip>/system#firmware`
+   directly.
+2. **Note what is running.** The section header carries the version; the first rows are
+   *Version · built <date>*, *Running slot* (`app0`/`app1`), *Next slot* (where the upload goes)
+   and *Image <size> · MD5 <sketch_md5>*. Write down the version, the slot and the MD5 – they tell
+   the old firmware from the new one afterwards (step 5). The same facts, machine-readable: *Advanced*
+   → **System info (JSON)** (`/api/system/info`, [`API.md`](API.md)); the device sheet on the
+   shelf shows the version in its *Firmware* row.
+3. **Keep the previous firmware.** The device has two slots: the upload goes to the *inactive*
+   one and the image you are running now **stays in the other slot** untouched – that is your
+   first way back (step 6). Also keep a *file* of it: the release asset
+   `tickrdisplay-<version>.bin` you flashed before (do not delete downloaded releases), or a dump
+   of the running slot – `http://<device-ip>/api/system/partition/<running slot>` in the address
+   bar, any user name + token (3a). The second update overwrites what the first left in the other
+   slot – if that was the stock firmware, back it up first (section 3).
+4. **Upload.** Choose `tickrdisplay-<version>.bin` → **Upload & flash** → confirm the dialog
+   (*Flash "…" (N bytes) to appX and reboot?*). The page shows *Uploading… N %*, then
+   *Update successful (N bytes to appX). Rebooting…* and reloads itself after 15 s. The e-ink
+   shows *Updating / keep the power on* and the LED is blue while flash is written; an aborted
+   upload restores the previous screen and leaves the running firmware untouched.
+   (`GET /update` answers `301` to `/system#firmware`.)
+5. **Check that the new image runs.** After the reload the *Firmware* section shows the new
+   *Version*, the *Running slot* has flipped to the other slot and the *MD5* changed. Ways to tell
+   two images apart, most to least reliable:
+   * **Version string** (`firmware.version` in `/api/system/info`, the device sheet, the beacon).
+     It is the build's `git describe --tags --always --dirty --match "v*"` unless the build set
+     `FIRMWARE_VERSION` itself: `v0.1.0` = exactly the tagged release (what CI publishes as a
+     release asset); `v0.1.0-4-g1a2b3c4` = 4 commits after the tag, `g` + the commit's short SHA;
+     a trailing `-dirty` = built from a working copy with uncommitted changes; `0.0.0-g<sha>` = no
+     reachable tag. Two builds of the same commit share the version but can differ in content
+     when either was `-dirty`.
+   * **`sketch_md5`** – the MD5 of the running image; differs for any two different builds.
+   * **Running slot** – flips on every update; the previous image is in the other one.
+   * **`firmware.build`** – the compile date and time of the sketch.
+   * **What the API answers** – the current firmware reports the Wi-Fi link counters
+     `wifi_disconnects`, `wifi_last_reason`, `wifi_down_s`, `wifi_reconnects`, `wifi_restarts` in
+     `GET /api/status` and announces the DHCP hostname `<device-name>-XXXXXX`
+     ([`DEVICE_UI.md`](DEVICE_UI.md) → *Wi-Fi link supervision*); an image without them is an
+     older one.
+6. **Going back.** *Firmware* → *Recovery* → **Boot other partition (appX)** → confirm: nothing
+   is flashed, the device restarts from the other slot (the previous TickrDisplay – or the stock
+   firmware, if that is what the other slot holds; the button says which slot and is disabled when
+   the other slot holds no bootable image). If the previous image is no longer on the device,
+   upload its saved file (step 3) exactly like a new one (step 4). Without a token or network:
+   recovery mode (5a).
 
 **From a URL:** `POST /api/system/update_from_url` with `{"url":"http://host/firmware.bin"}` makes
 the device fetch and flash the image itself (plain `http://` only).
@@ -181,10 +204,11 @@ get the URL you enter there parked on a relay and fetch it on their next wake-up
 
 **API token.** If an *API Token* is set (`/system` → *Security*, or the shelf's *Protect this device*
 card), every OTA / system endpoint (including `POST /update`) requires it: HTTP Basic auth with any
-user name and the token as password (`curl -u :<token> ...`) or the header `X-Api-Token: <token>`.
-The pages send the token the browser stored; `scripts/flash_ota.sh` and `scripts/backup_device.sh`
-read it from the environment variable `TICKR_API_TOKEN`. Without a token the endpoints are open to
-the whole LAN – set one before relying on the device.
+user name and the token as password or the header `X-Api-Token: <token>`. The pages send the token
+the browser stored; a download typed into the address bar gets the browser's user-name/password
+prompt; the command-line tools read it from the environment variable `TICKR_API_TOKEN`
+([section 7](#7-command-line-tools-optional)). Without a token the endpoints are open to the whole
+LAN – set one before relying on the device.
 
 The image is written to the OTA slot that is *not* currently running (`next_update` in
 `/api/system/info`), verified, made the boot partition, and the device restarts ~1.5 s after the
@@ -235,16 +259,17 @@ Three options, from least to most invasive.
 
 ### 5a. Switch the boot slot (stock still in the other partition)
 
-If `/api/system/info` (or the partition table on `/dev` of a `tickr_dev` build) shows the stock image
-in the other slot:
+If the stock image is still in the other slot (3a tells how to recognise it), press **Boot other
+partition (appX)** under `/system` → *Firmware* → *Recovery* and confirm. The button names the slot
+and is disabled when the other slot holds no bootable image; *Boot* in the partition table on `/dev`
+does the same on `tickr_dev` builds. From a terminal:
 
 ```sh
-curl -X POST http://<device-ip>/api/system/boot_partition \
+curl -u ":<token>" -X POST http://<device-ip>/api/system/boot_partition \
      -H 'Content-Type: application/json' -d '{"label":"app0"}'
 ```
 
-or press **Boot other partition** under `/system` → *Firmware* → *Recovery* (or *Boot* in the
-partition table on `/dev`, `tickr_dev` builds only). TickrDisplay checks that the partition is an
+TickrDisplay checks that the partition is an
 app slot with a valid image (`0xE9` magic, application descriptor, `esp_image_verify()`), sets it
 as boot partition and reboots. The stock firmware comes up, opens its `TickrMeter` portal if it
 cannot connect, and TickrDisplay stays in the other slot: you can come back the same way you came –
@@ -267,12 +292,9 @@ only matters if the stock image itself is broken.
 
 The vendor publishes recovery images (`recoveryfw.bin`, also referred to as `FW-45.bin`) at
 `https://api.tickrmeter.io/recoveryfw.bin`; see "How to force firmware update locally" on
-help.tickrmeter.com. It is a normal 1 268 912-byte ESP32 app image and fits in an OTA slot:
-
-```sh
-curl -fLO https://api.tickrmeter.io/recoveryfw.bin
-scripts/flash_ota.sh <device-ip> recoveryfw.bin
-```
+help.tickrmeter.com. It is a normal ESP32 app image and fits in an OTA slot: download it, then
+upload it on `/system#firmware` → **Upload & flash** exactly like a TickrDisplay image (4a), or
+from a terminal ([section 7](#7-command-line-tools-optional)).
 
 This works even if the stock slot had already been overwritten by a TickrDisplay update. A slot
 dump from section 3 (`app0_0x010000.bin`) can be uploaded the same way.
@@ -310,7 +332,8 @@ way to restore the *original* bootloader/partition table/NVS after `pio run -t u
   stops after 4 MB – expected. Backups and `write_flash` addresses are only valid for the table they
   were taken from.
 * **Image size limit.** The OTA slot on the stock table is **1 310 720 bytes**. `/update` refuses
-  larger images before erasing anything; `flash_ota.sh` warns as well.
+  larger images before erasing anything; the *Firmware* page and the command-line tools check the
+  size before uploading.
 * **Rollback bookkeeping.** Arduino-ESP32 is built with `CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE`: a
   freshly selected slot boots as `pending_verify` and the firmware marks itself `valid` on start; an
   image that crashes before that point is rolled back to the previous slot on the next reset (so is
@@ -321,7 +344,61 @@ way to restore the *original* bootloader/partition table/NVS after `pio run -t u
   (`TickrMeter` for stock, `TickrDisplay` for this firmware). TickrDisplay never modifies the vendor
   device identity in NVS.
 
-## 7. Stock partition table
+## 7. Command-line tools (optional)
+
+Everything above works from the browser. The tools below do the same over HTTP for scripts,
+several devices or a headless machine; none of them is needed for a normal update. They live in
+`scripts/` at the repository root. If an API token is set, put it into the environment variable
+`TICKR_API_TOKEN` first – the scripts send it as HTTP Basic auth (any user, password = token).
+
+**Upload a firmware image** (TickrDisplay `POST /update`, or the stock portal's `POST /u` at
+`192.168.4.1` – detected automatically, or forced with the flag):
+
+```sh
+# macOS / Linux (bash, curl)
+export TICKR_API_TOKEN=<token>
+scripts/flash_ota.sh <device-ip> tickrdisplay-<version>.bin            # TickrDisplay
+scripts/flash_ota.sh 192.168.4.1 tickrdisplay-<version>.bin --stock    # stock portal
+```
+
+```powershell
+# Windows (PowerShell 5.1 or 7, no extra tools)
+$env:TICKR_API_TOKEN = "<token>"
+.\scripts\flash_ota.ps1 <device-ip> .\tickrdisplay-<version>.bin        # TickrDisplay
+.\scripts\flash_ota.ps1 192.168.4.1 .\tickrdisplay-<version>.bin -Stock  # stock portal
+```
+
+Both check the `0xE9` image magic and the slot size, upload the file as multipart field `update`,
+print the device's answer and exit non-zero on failure. The bare request behind them, with `curl`
+(`curl.exe` ships with Windows 10 and later):
+
+```sh
+curl -u ":<token>" -F "update=@tickrdisplay-<version>.bin" http://<device-ip>/update
+```
+
+> **Unverified:** `scripts/flash_ota.ps1` has not been run on a Windows machine.
+
+**Back up every partition** (`nvs`, `otadata`, `app0`, `app1`, `spiffs`, `coredump`, …) into a
+folder with `SHA256SUMS` and a table of the app slots that says which one is the stock image:
+
+```sh
+scripts/backup_device.sh <device-ip>            # macOS / Linux -> backup_<date>/
+```
+
+Single downloads (`-J -O` keeps the server-supplied file name `<label>_0x<address>.bin`):
+
+```sh
+curl -u ":<token>" -fSJO http://<device-ip>/api/system/partition/app0
+curl -u ":<token>" -fSJO http://<device-ip>/api/system/partition/nvs
+curl -u ":<token>" -fSJO http://<device-ip>/api/system/partition/otadata
+# raw flash, e.g. the whole 4 MB (bootloader + partition table + everything):
+curl -u ":<token>" -fSJO "http://<device-ip>/api/system/flash?offset=0&length=0x400000"
+```
+
+`esptool.py image_info app0_0x010000.bin` prints a valid header for a dumped app slot. The boot-slot
+switch from a terminal is the `curl` in 5a.
+
+## 8. Stock partition table
 
 Standard Arduino-ESP32 `default.csv`, 4 MB, read from a flash dump of a TickrMeter (table at `0x8000`)
 and from the vendor recovery image header (`Flash size: 4MB`); how to take such a dump yourself is in
@@ -341,7 +418,7 @@ and from the vendor recovery image header (`Flash size: 4MB`); how to take such 
 Which slot the stock firmware occupies depends on the device's update history; check
 `/api/system/info` rather than assuming `app0` (how to tell the images apart: 3a).
 
-## 8. HTTP API
+## 9. HTTP API
 
 The system, OTA and partition endpoints used in this document (`POST /update`, `/api/system/info`,
 `update_from_url`, `boot_partition`, `partition/<label>`, `flash`, `restart`, the Wi-Fi and recovery

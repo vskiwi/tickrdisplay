@@ -22,7 +22,7 @@ flickers never reaches the panel.
 
 | # | Screen | When | What is on it |
 |---|---|---|---|
-| 1 | **Content** | Every payload with `title`/`value` (text look) or with `change` / `spark` (ticker look, [`TICKERS.md`](TICKERS.md)) | Text: title 9 pt top-left; value centred, cascade 18 pt ×2 → 18 → 12 → 9, truncated with `...`. Ticker: title left and change with a triangle on the 9 pt row, price centred, sparkline ≤ 200×24 bottom-left, age line 9 pt bottom-right. Badges bottom-right corner |
+| 1 | **Content** | Every payload with `title`/`value` (text look) or with `change` / `spark` (ticker look, [`TICKERS.md`](TICKERS.md)) | Text: title 9 pt top-left; value centred, cascade 18 pt ×2 → 18 → 12 → 9, truncated with `...`. Ticker: title left and change with a triangle on the 9 pt row, price centred, sparkline ≤ 200×24 bottom-left, age line 9 pt bottom-right – or, in its place, a payload's `time` string / the funding line of a Binance perpetual (`FR +0.0100%`, [`TICKERS.md`](TICKERS.md) → *Binance futures*). Badges bottom-right corner |
 | 2 | **WAITING** | No payload shown on this boot: after the first connect, after a service frame ends, on a battery device without a Pull URL | Panel icon 40×28; *Ready* 18 pt, *choose content at* 12 pt, `http://<ip>/` 12 pt (9 pt for a 15-char address); badges as on content |
 | 3 | **Badges** | Wi-Fi lost ≥ 60 s; bolt ↔ battery after 5 s of a stable new reading; **BATTERY LOW** at ≤ 15 % on battery with a known level | Right-aligned in rows 112–127: `[Wi-Fi lost] [NN%] [battery]` or `[Wi-Fi lost] [bolt]`; low = battery outline with an exclamation mark; outline only when the level is unknown (board `?`); **nothing** for `power: unknown` |
 | 4 | **BATTERY EMPTY** card | Battery mode, cell < 3300 mV; drawn once per discharge, then 60-min sleeps until the cell is > 3450 mV or USB is found | Empty battery glyph 80×40 above *Battery empty* 18 pt / *connect USB power* 12 pt. Never served by `/api/screen.*` – the device sleeps right after |
@@ -122,6 +122,51 @@ machine; it uses two helpers (`device_offline_card_due()`,
 * **Splash.** The only place the brand and the version appear. Its third
   line is one action, no count; the count belongs to frames 2/3 of a
   power-cycle series.
+
+## Wi-Fi link supervision
+
+The OFFLINE card says what the panel knows; getting the link back is the
+job of a supervisor that runs on the awake (USB) device next to the
+state machine (`logic/wifi_supervisor`, `managers/wifi_link`). The Wi-Fi
+core's own auto-reconnect is one attempt per disconnect event and stops
+for good on several reason codes (a router that rejects the
+authentication while it boots, a band-steering disassociation), so the
+firmware does not rely on it alone:
+
+* **Link down** (`WiFi.status()` not connected) for **25 s** → the device
+  disconnects and calls `WiFi.begin()` with the saved network itself, then
+  again after **15 s, 30 s, 60 s, 60 s, …**; the back-off resets when the
+  link is back.
+* **The core gave up** (`WL_CONNECT_FAILED`, `WL_NO_SSID_AVAIL`) → the
+  first own attempt after **10 s**.
+* **Associated without an address** (the DHCP lease lost and not renewed):
+  a fresh association gets **2 min** before it is torn down and re-made,
+  which also restarts the DHCP client.
+* **30 min** without a connection → `ESP.restart()`. It is a software
+  reset: it does not count towards recovery mode, and the RTC copy of the
+  frame lets the panel resume with a partial refresh.
+* Nothing is done while the set-up portal or the recovery access point is
+  up (they drive the station themselves) or while a firmware image is
+  being written; the timers keep running. The battery flow does not run
+  the supervisor – every wake-up is a fresh `WiFi.begin()`.
+
+Each counted loss (a link that had an address and lost it, the core's own
+retries are not counted) prints one serial line with the driver's reason
+code, as do the supervisor's attempts and the restart. `GET /api/status`
+reports `wifi_disconnects`, `wifi_last_reason`, `wifi_down_s`,
+`wifi_reconnects` and `wifi_restarts` (see [`API.md`](API.md) → *Status
+and configuration*); the counters live in RTC memory, so they survive the
+supervisor's restart, an OTA restart and deep sleep, and start from zero
+after a power-on.
+
+The device also announces a **hostname** to the DHCP server:
+`<device-name>-XXXXXX`, the user's device name reduced to an RFC 1123
+label (letters, digits, `-`; space and `_` become `-`, everything else is
+dropped, lower-case, `tickr` when nothing is left) plus the last three
+bytes of the MAC address, at most 32 characters – `Shelf Left` on the
+device `02:00:00:A1:B2:C3` is `shelf-left-A1B2C3`. A renamed device announces the
+new name from its next boot; `/api/system/info` → `wifi.hostname` shows
+the one in use.
 
 ## Power-mode switch
 
@@ -243,7 +288,7 @@ against an untrusted image.
 |---|---|---|---|
 | USB ↔ battery | 4500 / 4350 mV rail (rev A), +80 / −30 mV difference (rev B) | 5 polls | one card per 10 min; a 3rd flip inside the window changes the badge only. Mode switch: restart 2 min after the debounced flip, 10 min when flapping or when the previous reading stood < 60 s |
 | Wi-Fi up → down | `WiFi.isConnected()` | 60 polls (`T_short`) → crossed badge | ≤ 1 badge-only refresh per 60 s |
-| Wi-Fi still down | – | 10 min (`T_long`, USB) → OFFLINE card | once per outage; the reconnect must hold 30 s before the content comes back |
+| Wi-Fi still down | – | 10 min (`T_long`, USB) → OFFLINE card; own reconnects from 25 s on, restart at 30 min (*Wi-Fi link supervision*) | once per outage; the reconnect must hold 30 s before the content comes back |
 | Battery ≤ 15 % | 5 % display step | reading at wake (battery) / 60 s spacing (USB) | badge only |
 | Battery < 3300 mV | 3300 / 3450 mV | one reading per wake | once per discharge |
 | Content stale | – | `T_stale` = 3 × refresh interval, min 10 min (the payload's own `age_s` counts) | age line only; one refresh at the crossing. A *source* failure (HTTP 500, extract error) is an age line, never a red LED |
@@ -321,7 +366,9 @@ frame, so the shelf shows the sleeper's last card.
 
 > **Unverified:** the OFFLINE card sequence on USB (10 min without the
 > router, card, restore after the 30 s hold) has not been exercised on
-> hardware.
+> hardware as a staged test; likewise the link supervisor's own reconnects
+> and its 30-min restart (host-tested only – a router outage on the bench
+> is still owed).
 
 > **Unverified:** the runtime USB → battery switch (cable pulled from an
 > awake unit: card, grace, restart into the battery flow) and the

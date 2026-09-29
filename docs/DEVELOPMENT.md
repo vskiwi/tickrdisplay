@@ -148,7 +148,8 @@ expiry check on the device (mbedTLS without `MBEDTLS_HAVE_TIME_DATE`).
 UART: wire the adapter to the programming header, enter the bootloader (hold IO0 to GND, tap RST,
 release IO0), then `pio run -e tickr -t upload` (add `--upload-port /dev/ttyUSB0` if needed;
 `upload_speed` is 921600 – drop to 460800 if the adapter is flaky). OTA: `dist/tickrdisplay-<version>.bin`
-through the stock `/update` page or TickrDisplay's `/system#firmware` / `scripts/flash_ota.sh`; with
+through the stock `/update` page or TickrDisplay's `/system#firmware` (command-line equivalents for
+bash and PowerShell: [`FLASHING.md`](FLASHING.md) → *Command-line tools*); with
 a `tickr_dev` image, an *OTA password* and USB power, ArduinoOTA works too
 (`pio run -e tickr_dev -t upload --upload-port <device-ip> --upload-flag --auth=<ota_password>`).
 Details: [`FLASHING.md`](FLASHING.md).
@@ -186,6 +187,9 @@ runs on the device. One directory per module:
 * `test_source` – ticker source: mini-JSONPath extraction from the presets' response shapes
   (`fixtures.h`), preset resolution, number formatting, config schema migration, malformed bodies.
 * `test_pull_scheduler` – USB-mode pull timing: interval + jitter, back-off on failures, fetch-now.
+* `test_wifi_supervisor` – the Wi-Fi link supervisor: grace, 15/30/60 s back-off, the DHCP grace on an
+  association without an address, the 30-min restart, hold ([`DEVICE_UI.md`](DEVICE_UI.md) → *Wi-Fi link supervision*).
+* `test_hostname` – the DHCP hostname label from the device name (sanitising, length, fallback).
 * `test_auth_policy` – the `401` challenge policy (Basic challenge only for navigations).
 * `test_recovery_counter` – the power-cycle recovery counter on a fake NVS.
 * `test_peer_table` – the peer table, the `/peers.bin` blob and the beacon wire format.
@@ -258,7 +262,8 @@ the same image later. To upgrade: bump the version in `platformio.ini`, `pio pkg
 ```
 .github/workflows/build.yml   GitHub Actions: build, test, cppcheck, release
 .gitlab-ci.yml                GitLab CI equivalent
-scripts/flash_ota.sh          OTA upload to a device (TickrDisplay or the stock portal)
+scripts/flash_ota.sh          OTA upload to a device (TickrDisplay or the stock portal), bash + curl
+scripts/flash_ota.ps1         the same for Windows PowerShell 5.1+ (no external tools)
 scripts/backup_device.sh      dump every partition of a device over HTTP
 tickr_display/
   platformio.ini              environments, pinned dependencies, flags

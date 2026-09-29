@@ -129,9 +129,13 @@ Pairing works on USB power only; *Pair* is disabled for a device on battery.
 
 ### Update firmware
 
-* **One device**: ⚙ → *Firmware* → choose the `.bin` → *Upload & flash* →
-  confirm. The image goes to the inactive slot; the page reloads after the
-  reboot. For another device open its sheet → *Open device page ↗* first.
+* **One device**: ⚙ → *Firmware* – the section shows *Version · built*,
+  *Running slot*, *Next slot* (where the upload goes) and *Image size · MD5*
+  → choose the `.bin` → *Upload & flash* → confirm. The page shows
+  *Uploading… N %*, then *Update successful (N bytes to appX). Rebooting…*
+  and reloads after the reboot with the new version. The image goes to the
+  inactive slot; the previous firmware stays in the other one. For another
+  device open its sheet → *Open device page ↗* first.
 * **All members**: drawer → **Updates** → choose the `.bin` → *Update all
   members* → confirm. Online USB members are flashed one after another, this
   device last (its reboot ends the page); progress shows as *flashing N %*
@@ -144,9 +148,10 @@ Pairing works on USB power only; *Pair* is disabled for a device on battery.
 
 ### Return to the previous firmware or to stock
 
-⚙ → *Firmware* → *Recovery* → *Boot other partition* → confirm. Nothing is
+⚙ → *Firmware* → *Recovery* → *Boot other partition (appX)* → confirm. Nothing is
 flashed; the device restarts from the other slot (the previous TickrDisplay
-or the stock firmware). Details: [`FLASHING.md`](FLASHING.md). Without a
+or the stock firmware). The button names the slot and is disabled when the
+other slot holds no bootable image. Details: [`FLASHING.md`](FLASHING.md). Without a
 token or network use recovery mode (below).
 
 ## API token in the browser
