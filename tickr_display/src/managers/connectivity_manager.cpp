@@ -5,9 +5,11 @@
 #include <mbedtls/base64.h>
 #include <esp_system.h>
 #include <esp_wifi.h>
+#include <esp_task_wdt.h>
 #include "ota_manager.h"
 #include "arduino_ota.h"
 #include "wifi_portal.h"
+#include "wifi_link.h"
 #include "recovery_manager.h"
 #include "peer_manager.h"
 #include "pairing_manager.h"
@@ -215,6 +217,10 @@ bool ConnectivityManager::init(DataCallback onData, bool low_power) {
     web_auth_set_token(_config.api_token);
     renderer_set_led_rule(_config.led_rule);
 
+    // Hostname "<device-name>-XXXXXX", event counters (managers/wifi_link.h):
+    // before WiFi.mode() - the core applies the hostname when the STA starts.
+    wifi_link_begin(_config.device_name);
+
     // Bring the Wi-Fi driver up in its default persistent mode (credentials
     // live in NVS) and check whether it has a saved network. This is the same
     // NVS record the stock firmware and WiFiManager use, so switching slots
@@ -236,7 +242,7 @@ bool ConnectivityManager::init(DataCallback onData, bool low_power) {
         LOGV("WiFi: connecting to saved network '%s'\n", (const char*)conf.sta.ssid);
         WiFi.begin();
         if (wait_for_sta(low_power ? STA_CONNECT_TIMEOUT_BATTERY_MS : STA_CONNECT_TIMEOUT_USB_MS)) {
-            return on_wifi_connected();
+            return on_wifi_connected(low_power);
         }
         Serial.println("WiFi connect failed");
         if (low_power) return false;
@@ -280,7 +286,7 @@ bool ConnectivityManager::init(DataCallback onData, bool low_power) {
         Serial.println("Config portal timed out");
         return false;
     }
-    return on_wifi_connected();
+    return on_wifi_connected(low_power);
 }
 
 // Polls WiFi.status() for up to `timeout_ms`. Gives up early only on an
@@ -299,12 +305,17 @@ bool ConnectivityManager::wait_for_sta(uint32_t timeout_ms) {
     return WiFi.status() == WL_CONNECTED;
 }
 
-bool ConnectivityManager::on_wifi_connected() {
+bool ConnectivityManager::on_wifi_connected(bool low_power) {
     Serial.println("WiFi Connected");
     Serial.println(WiFi.localIP());
 
     // Allow time for WiFi stack to stabilize
     delay(100);
+
+    // The awake device keeps its link itself from here on (docs/DEVICE_UI.md
+    // "Wi-Fi link supervision"); a battery device sleeps before loop() runs
+    // and begins afresh on every wake-up.
+    if (!low_power) wifi_link_arm();
 
     // Stable client id derived from the MAC address: tickrdisplay-XXXXXX
     uint8_t mac[6];
@@ -580,7 +591,7 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
 // GET /api/status - public: no secrets, and its auth_enabled flag is
 // what tells a page without a token that it is read-only.
 void ConnectivityManager::handle_status(AsyncWebServerRequest* request) {
-    StaticJsonDocument<768> doc;
+    StaticJsonDocument<1024> doc;
     doc["uptime_s"] = (uint32_t)(millis() / 1000);
     doc["heap_free"] = ESP.getFreeHeap();
     doc["heap_min_free"] = ESP.getMinFreeHeap();
@@ -613,6 +624,15 @@ void ConnectivityManager::handle_status(AsyncWebServerRequest* request) {
     doc["tls_insecure_used"] = _tls_insecure_used;
     doc["reset_reason"] = (int)esp_reset_reason();
     doc["last_error"] = _last_error;
+    // Link diagnostics (managers/wifi_link.h): counters kept across software
+    // restarts and deep sleep, zero after a power-on.
+    WifiLinkStats wl;
+    wifi_link_stats(&wl);
+    doc["wifi_disconnects"] = wl.disconnects;
+    doc["wifi_last_reason"] = wl.last_reason;
+    doc["wifi_down_s"] = wl.down_s;
+    doc["wifi_reconnects"] = wl.reconnects;
+    doc["wifi_restarts"] = wl.restarts;
     // Read-only LED state: the colour actually driven to the LEDs (an active
     // overlay - OTA, identify, pairing... - wins over the base colour), so the
     // panel's LED bar can mirror the real device (docs/WEB_UI.md "Card states and badges").
@@ -1038,6 +1058,10 @@ void ConnectivityManager::mqtt_callback(char* topic, byte* payload, unsigned int
 }
 
 void ConnectivityManager::loop() {
+    // Link supervisor: no action while an access point is up (the set-up
+    // portal / recovery AP drive the STA themselves) or an image is being
+    // written; the outage timers keep running.
+    wifi_link_loop(wifi_portal_ap_up() || ota_update_in_progress() || ota_arduino_in_progress());
     run_source_test();   // a paused POST /api/source/test, if any (blocks like a scheduled pull)
     if (_mqtt_reconfigure) {
         _mqtt_reconfigure = false;

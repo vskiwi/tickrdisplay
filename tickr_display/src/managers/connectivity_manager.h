@@ -77,7 +77,7 @@ private:
     AsyncWebServerRequestPtr _test_req;
 
     bool wait_for_sta(uint32_t timeout_ms);
-    bool on_wifi_connected();
+    bool on_wifi_connected(bool low_power);
     void setup_webserver();
     void setup_mqtt();
     void connect_mqtt();
