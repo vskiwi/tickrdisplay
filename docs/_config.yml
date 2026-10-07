@@ -1,7 +1,7 @@
 # GitHub Pages site for https://github.com/vskiwi/tickrdisplay
-# Served from the `docs/` folder of the `main` branch. Only files with YAML
-# front matter (index.md) are rendered; the other *.md here stay raw and are
-# linked to on GitHub instead.
+# Served from the `docs/` folder of the `main` branch. Only index.md is
+# rendered; the other docs contain Jinja/Liquid-like syntax ({% set %}, {{ }})
+# that breaks the Jekyll build, so they are excluded and linked to on GitHub.
 title: TickrDisplay
 description: Cloud-free open-source firmware for the TickrMeter e-ink ticker (ESP32, PlatformIO). Crypto quotes fetched on the device, HTTP/MQTT push, multi-device shelf, no vendor account.
 url: https://vskiwi.github.io
@@ -15,3 +15,15 @@ plugins:
 # Google Search Console: after "Add property" -> "HTML tag", paste the
 # content="..." value here (jekyll-seo-tag emits the meta tag).
 # google_site_verification: ""
+exclude:
+  - API.md
+  - DEVELOPMENT.md
+  - DEVICE_UI.md
+  - FLASHING.md
+  - HARDWARE.md
+  - LEGAL.md
+  - MANUAL_TESTS.md
+  - MULTI_DEVICE.md
+  - RELEASING.md
+  - TICKERS.md
+  - WEB_UI.md
