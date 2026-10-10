@@ -14,7 +14,7 @@ plugins:
   - jekyll-sitemap
 # Google Search Console: after "Add property" -> "HTML tag", paste the
 # content="..." value here (jekyll-seo-tag emits the meta tag).
-# google_site_verification: ""
+google_site_verification: "7-5bMeeZlsHjfSgEDaQWPSsNEACNbybpECeqrw4r18U"
 exclude:
   - API.md
   - DEVELOPMENT.md
