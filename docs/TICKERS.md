@@ -9,10 +9,11 @@ no server of your own. The payload fields a proxy can send (`change`, `dir`,
 
 ## 1. What the Ticker source does
 
-* The device itself fetches **one symbol** over HTTPS every *refresh
-  interval* (1–1440 min; the editor pre-fills 5), extracts price and change
-  from the JSON answer, formats them and draws the ticker frame. One symbol
-  per device; several symbols = several devices.
+* The device itself fetches a symbol over HTTPS every *refresh interval*
+  (1–1440 min; the editor pre-fills 5), extracts price and change from the
+  JSON answer, formats them and draws the ticker frame. One symbol fills
+  the panel; up to **four** share it in the **2×2 grid** (§5) – there is
+  no rotation through a list.
 * **Presets** – CoinGecko, Kraken, Binance – know the URL and the JSON
   fields. **Custom JSON** takes any URL that answers JSON, with the fields
   named as small JSON paths – a public API or a proxy on your LAN.
@@ -74,7 +75,9 @@ Caveats:
   whether it works depends on your region. An unknown symbol answers an
   error object without `lastPrice`, shown as `price path`.
 * No preset needs an API key; all use the roots baked into the firmware
-  (§7). The interval floor is 1 min for every preset.
+  (§8). The interval floor is 1 min for every preset. A grid (§5) makes
+  one request per ticker and cycle (two for a futures perpetual) – four
+  CoinGecko tickers at 1 min are 4 of the ≈ 10 requests per minute.
 
 ## 3. Custom JSON
 
@@ -100,7 +103,7 @@ For any API that answers a JSON document of at most **4096 bytes**.
   `%`) or *open price* (change = `(price − open) / open`).
 * **History array path** (optional): an array of numbers there (≥ 2 points,
   the first 48 kept) is drawn as the sparkline instead of the device's own
-  history (§5).
+  history (§6).
 * A value may be a JSON string (`"84000.06"` – kept exactly) or a JSON
   number (integer, or a float with about seven significant digits);
   anything else is `price not a number` / `change not a number`. Symbol
@@ -156,7 +159,52 @@ sparkline bottom-left, the age line bottom-right, badges in the corner
   for other content. A proxy's `time` string is shown verbatim instead, and
   so is the funding line of a Binance perpetual (`FR +0.0100%`).
 
-## 5. Sparkline history
+## 5. Several tickers on one panel: the 2×2 grid
+
+*View* = **2×2 grid** in the editor shows up to four sources at once, each
+in a cell of 148 × 64 px separated by 1 px lines: top left, top right,
+bottom left, bottom right in the order of the editor's rows. One source in
+the grid view is the single look of §4.
+
+* **A cell**: the short name on a black badge (12 pt, 9 pt when it would
+  grow past half the cell) with the change and its triangle right of it,
+  the price right-aligned below. The price is drawn whole at 18 pt when it
+  fits 140 px, otherwise **without its fraction** when the integer part is
+  1 000 or more (`84 014.90` → `84 015`, rounded half-up), otherwise at 12
+  or 9 pt whole. No sparkline in a cell; the bottom row of a cell is empty.
+* **The last cell** carries the age line and the badges of the frame; with
+  **two or three** tickers it carries nothing else, the cells fill top left
+  → top right → bottom left and the unused ones stay white. With four, the
+  age line and the badges share the bottom-right cell with its ticker.
+* **One frame per cycle**: all sources are fetched one after another (the
+  watchdog fed in between), then the panel refreshes once – a changed
+  price is a differential refresh, a changed set or order of tickers or
+  the switch between the single and the grid view is a full one
+  ([`DEVICE_UI.md`](DEVICE_UI.md) → *E-ink refresh rules*). The age line
+  follows the **oldest** quote on the frame; *stale* is counted from it.
+* **A source that fails** keeps its last good price in its cell and shows
+  **`?`** in place of the change until it answers again – also after a
+  deep sleep on battery (the last values live in RTC memory with a
+  checksum). The cycle counts as successful when at least one source
+  answered; `last_error` names the row (`pull: #2 http 451`). A source
+  that never answered shows its badge and `?` with an empty price. The
+  LED rule (§4) follows the first ticker.
+* **Battery**: the grid makes up to four TLS fetches per wake, so the
+  firmware raises the on-battery interval to **at least 15 minutes** (the
+  editor says so and sets the field's minimum); on USB the interval is as
+  configured, with the floor of 1 min.
+* **Mixed presets** are fine – a Binance pair next to a Kraken pair and a
+  CoinGecko id. Every row has its own *Advanced* settings (label, short
+  name, decimals, separator, custom URL and paths); the LED rule and the
+  interval are per device.
+* **API**: `tk_view` (`single` · `grid`), `tk_n` (1–4) and the rows as
+  `tk1_*` … `tk3_*` next to the `tk_*` of the first – [`API.md`](API.md)
+  → *Status and configuration*; `/api/screen/state` reports
+  `layout: "grid"` with `symbols[]` and `shorts[]`. Rows beyond `tk_n`
+  are kept until the next save of the ticker source. *Test* tests one row
+  at a time.
+
+## 6. Sparkline history
 
 * The device keeps the last **48** prices of the ticker source, one per
   successful fetch: 4 h at a 5-min interval, 2 days at 1 h. Drawn min–max
@@ -167,9 +215,10 @@ sparkline bottom-left, the age line bottom-right, badges in the corner
 * **Reset** by a power-off or reset (RTC memory is lost) and by a change of
   the fetch URL – symbol, market, preset or custom URL. *Test* does not
   touch it. A custom source's own history array wins for that frame; the
-  ring is still fed.
+  ring is still fed. The grid (§5) draws no sparkline and does not feed
+  the ring.
 
-## 6. Fetch schedule and errors
+## 7. Fetch schedule and errors
 
 **USB power.** The first fetch runs 3 s after Wi-Fi is up, then every
 refresh interval ± 10 % jitter (a shelf of devices does not hit one API in
@@ -179,10 +228,13 @@ interval fetches **at once**. A due fetch without a link is retried after
 30 s, one during a pairing screen after 10 s – neither counts as a miss.
 MQTT may stay active alongside. An identical frame is not redrawn; a
 changed one is a differential refresh, with a forced full every 9th frame
-or 60 min ([`DEVICE_UI.md`](DEVICE_UI.md) → *E-ink refresh rules*).
+or 60 min ([`DEVICE_UI.md`](DEVICE_UI.md) → *E-ink refresh rules*). A grid
+cycle (§5) is all its requests in a row and one frame; it is a miss only
+when every source failed.
 
-**Battery power.** One fetch per wake-up, then deep sleep for the refresh
-interval; the LED blinks green after a success, red after a miss. A miss
+**Battery power.** One fetch cycle per wake-up, then deep sleep for the
+refresh interval (at least 15 min with a grid); the LED blinks green after a
+success, red after a miss. A miss
 doubles the sleep (2×, 4× …, capped at 60 min, never below the interval);
 the first miss draws nothing, the second and every fourth after it draw the
 OFFLINE card with the age of the shown quote ([`DEVICE_UI.md`](DEVICE_UI.md)
@@ -199,14 +251,15 @@ without the prefix:
 |---|---|
 | `http 451` | Binance geo-block – the region is not served |
 | `http 4xx` / `5xx` | any other status: rate limit `429`, wrong URL `404` |
-| `connect/tls failed` | no connection, or the certificate chain does not verify (§7) |
+| `connect/tls failed` | no connection, or the certificate chain does not verify (§8) |
 | `invalid url` · `empty body` · `incomplete body` | the URL does not parse · nothing came back · the connection dropped mid-answer |
 | `response too large` · `not json` | over 4096 bytes (filter at the source or through a proxy) · not a JSON document |
 | `price path` / `change path` | nothing at that path – usually a wrong symbol (Binance's error object, CoinGecko's `{}`) |
 | `price not a number` / `change not a number` | the value there is not numeric, or the open price is 0 |
 | `ticker not configured` · `no wifi` | the saved source does not resolve (no symbol / no price path) · *Test* only, the device is not connected |
+| `#2 http 451` (any reason with a `#N`) | the grid's row N failed this cycle; the other cells were drawn |
 
-## 7. TLS
+## 8. TLS
 
 The transport is chosen by the kind of source:
 
@@ -221,39 +274,48 @@ the LAN. The bundle is generated at build time from
 `tickr_display/certs/*.pem` (`scripts/build_ca_bundle.py`) and is not
 checked for expiry on the device. Fingerprints: [`SECURITY.md`](../SECURITY.md).
 
-## 8. Setting it up in the web UI
+## 9. Setting it up in the web UI
 
 Shelf page (`/`) → click the device → **Content…** → *Source* = **Ticker**:
 
-1. **Market**: CoinGecko · Kraken · Binance · Binance USDⓈ-M futures ·
+1. **View**: *One ticker* or *2×2 grid – up to 4 tickers* (§5). In the
+   grid view the market / symbol fields become a list of rows – preset,
+   symbol, market, short name, ▲ ▼ to reorder (= the cell order), ✕ to
+   remove, *Test* per row, *+ Add ticker* up to four; the radio button
+   picks the row the *Advanced* section edits.
+2. **Market**: CoinGecko · Kraken · Binance · Binance USDⓈ-M futures ·
    Binance COIN-M futures · Custom JSON – the fields show that preset's
    placeholders and a one-line hint with the API's limits.
-2. **Symbol** and **market**; the futures presets take the contract in the
+3. **Symbol** and **market**; the futures presets take the contract in the
    market field (`USDT` / `USD_PERP` for the perpetual, `USDT_261225` /
    `USD_261225` for a quarterly); *Custom JSON* adds URL, price path, change
-   path, change mode and the optional history array path.
-3. **Every N minutes** – the refresh interval (pre-filled 5 for a device not
-   yet on a ticker; a battery device shows the handshake hint).
-4. **Test** – one fetch on *that* device, nothing saved: `BTC/USDT -
+   path, change mode and the optional history array path (in the grid view
+   under *Advanced* of that row).
+4. **Every N minutes** – the refresh interval (pre-filled 5 for a device not
+   yet on a ticker; a battery device shows the handshake hint, and with a
+   grid the 15-minute floor).
+5. **Test** – one fetch on *that* device, nothing saved: `BTC/USDT -
    Binance: 84 000.06  +0.07%  (812 ms)` or `Error: http 451`; a futures
    perpetual adds the funding line (`FR +0.0048%`, or *funding: n/a* when
    only the second request failed). The browser cannot call the exchanges
    itself (CORS), the device can.
-5. **Advanced** – label, **short name** for the badge (≤ 7 chars; the
+6. **Advanced** – label, **short name** for the badge (≤ 7 chars; the
    placeholder shows the derived name after a *Test*), decimals, thousands
    separator, **LED rule**.
-6. **Save** – the device fetches at once and the tile preview follows.
+7. **Save** – the device fetches at once and the tile preview follows.
 
 **Text → Send** or **Custom JSON URL → Save** on a ticker device afterwards
 switches the source, so the ticker stops fetching. *For all…* offers Ticker
 for awake devices; sleeping ones are skipped. The same fields can be posted
 by a script: [`API.md`](API.md) → *Status and configuration*.
 
-## 9. Unverified
+## 10. Unverified
 
 > **Unverified:** the ticker on a **battery** device – one fetch per wake
 > and the sparkline history surviving a real deep sleep – is host-tested
-> only and has not been exercised on hardware.
+> only and has not been exercised on hardware. The same holds for the grid
+> on battery: the 15-minute floor, the awake time of four fetches per wake
+> and the last cell values surviving a deep sleep.
 
 > **Unverified:** the back-off sequence and the `stale N min` line on a
 > **failing source** (a dead proxy, a rate-limited API) have not been

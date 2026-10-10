@@ -34,6 +34,34 @@ static SourceError run(const SourceSpec& s, const char* json, SourceResult* r, S
     return source_extract(json, strlen(json), p, r);
 }
 
+// --- the 2x2 grid: view, row count, row keys (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid")
+
+void test_grid_view_strings_and_rows_clamp(void) {
+    TEST_ASSERT_EQUAL_STRING("single", source_view_str(SRC_VIEW_SINGLE));
+    TEST_ASSERT_EQUAL_STRING("grid",   source_view_str(SRC_VIEW_GRID));
+    TEST_ASSERT_EQUAL_STRING("single", source_view_str(77));                 // out of range -> single
+    TEST_ASSERT_EQUAL_UINT8(SRC_VIEW_GRID,   source_view_parse("grid"));
+    TEST_ASSERT_EQUAL_UINT8(SRC_VIEW_SINGLE, source_view_parse("single"));
+    // the schema 8 -> 9 migration: a file without tk_view / tk_n reads as single, one row
+    TEST_ASSERT_EQUAL_UINT8(SRC_VIEW_SINGLE, source_view_parse(NULL));
+    TEST_ASSERT_EQUAL_UINT8(SRC_VIEW_SINGLE, source_view_parse("pages"));
+    TEST_ASSERT_EQUAL_UINT8(1, source_rows_clamp(1));
+    TEST_ASSERT_EQUAL_UINT8(4, source_rows_clamp(4));
+    TEST_ASSERT_EQUAL_UINT8(1, source_rows_clamp(0));
+    TEST_ASSERT_EQUAL_UINT8(1, source_rows_clamp(5));
+    TEST_ASSERT_EQUAL_UINT8(1, source_rows_clamp(-3));
+}
+
+void test_grid_row_keys(void) {
+    char k[20];
+    source_row_key(0, "symbol", k, sizeof(k));   TEST_ASSERT_EQUAL_STRING("tk_symbol", k);    // row 0 = the single source's keys
+    source_row_key(1, "symbol", k, sizeof(k));   TEST_ASSERT_EQUAL_STRING("tk1_symbol", k);
+    source_row_key(3, "decimals", k, sizeof(k)); TEST_ASSERT_EQUAL_STRING("tk3_decimals", k);
+    source_row_key(2, "short", k, sizeof(k));    TEST_ASSERT_EQUAL_STRING("tk2_short", k);
+    char tight[6];
+    source_row_key(2, "symbol", tight, sizeof(tight)); TEST_ASSERT_EQUAL_STRING("tk2_s", tight);   // cut, never overrun
+}
+
 // --- enums ------------------------------------------------------------------
 
 void test_enum_strings_round_trip(void) {
@@ -562,5 +590,7 @@ int main(int, char**) {
     RUN_TEST(test_extract_malformed_bodies);
     RUN_TEST(test_extract_kraken_open_zero_is_an_error);
     RUN_TEST(test_result_change_feeds_t1_direction);
+    RUN_TEST(test_grid_view_strings_and_rows_clamp);
+    RUN_TEST(test_grid_row_keys);
     return UNITY_END();
 }

@@ -111,6 +111,8 @@ static FrameCanvas canvas;
 static char _last_title[64] = "";
 static char _last_message[128] = "";
 static TickerFields _tk = {};                // ticker fields of the content; _tk.ticker selects the layout
+static GridFrame _grid = {};                 // the cells of a grid frame (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid")
+static bool      _grid_on = false;           // the content is the grid (_tk.ticker is set too: age line, stale)
 static uint32_t _stale_ms = DS_T_STALE_MIN_MS; // T_stale for the age line (display_set_stale_ms)
 static uint32_t _content_at_ms = 0;          // when the content was last shown (stale_s)
 static bool     _stale_fired = false;        // the stale crossing of this content already asked for its refresh (display_stale_crossed)
@@ -142,10 +144,10 @@ static uint32_t _refreshes_skipped = 0;      // badge changes folded into a late
 // esp_attr.h), `.rtc_noinit` costs no flash and is never initialized, so
 // the copy also survives ESP.restart(). CRC-32 over everything before
 // `crc`; a torn copy (crash mid-write) or random memory (power-on) fails it.
-// Layout kind of the last BASE content frame: text / ticker / WAITING - the
-// policy's layout_changed (cards and service frames leave it alone, so the
-// content back after one compares against its own kind).
-enum ShownKind : uint8_t { SHOWN_NONE = 0, SHOWN_TEXT, SHOWN_TICKER, SHOWN_WAITING };
+// Layout kind of the last BASE content frame: text / ticker / WAITING / the
+// 2x2 grid - the policy's layout_changed (cards and service frames leave it
+// alone, so the content back after one compares against its own kind).
+enum ShownKind : uint8_t { SHOWN_NONE = 0, SHOWN_TEXT, SHOWN_TICKER, SHOWN_WAITING, SHOWN_GRID };
 struct RtcFrame {
     uint8_t  px[SCREEN_FRAME_LEN];
     uint8_t  partials_since_full;
@@ -356,7 +358,8 @@ static void draw_panel_icon(int16_t x, int16_t y) {
 }
 
 // Badges in the bottom-right corner, right-aligned: [Wi-Fi lost] [NN% battery | bolt].
-static void draw_badges() {
+// Returns the x where the badges begin (the grid's age line stops before it).
+static int16_t draw_badges() {
     int16_t right = SCREEN_W - TEXT_MARGIN_X;
     const int16_t y0 = SCREEN_H - BADGE_H;
     if (_status.power == BADGE_POWER_USB) {
@@ -378,7 +381,8 @@ static void draw_badges() {
         }
         right -= 8;
     }
-    if (!_status.wifi_connected) draw_wifi_lost(right - 13, y0 + 12, 2);
+    if (!_status.wifi_connected) { draw_wifi_lost(right - 13, y0 + 12, 2); right -= 26 + 6; }
+    return right;
 }
 
 // ---------------------------------------------------------------------------
@@ -533,6 +537,94 @@ static void draw_content() {
             print_centered_fitted(price, top, bottom, kPriceFonts, 5, 0x3);
         }
         else print_centered_fitted(_last_message, top, bottom, kValueFonts, 4, 0x1);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// The 2x2 grid (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid"):
+// cells of GRID_CELL_W x GRID_CELL_H with 1 px separators; in a cell row A is
+// the name badge (12 pt white on black, 9 pt when the field would pass
+// GRID_BADGE_MAX_W) with the change 9 pt and its triangle right-aligned -
+// or "?" for a source that failed this cycle - row B the price right-aligned
+// (18 pt whole -> 18 pt without the fraction -> 12 -> 9, grid_fit_price),
+// row C empty. The last cell carries the age line and the badges (rows
+// 112-127, below its price band); it shows a ticker only with four sources.
+// ---------------------------------------------------------------------------
+#define GRID_BADGE_H      20
+#define GRID_BADGE_PAD    4
+#define GRID_BADGE_MAX_W  70
+#define GRID_CELL_PAD     4
+// Price band of a cell: rows GRID_PRICE_TOP .. +GRID_PRICE_H-1 (18 pt digits are
+// 25 px tall); in the last cell it ends on panel row 110, a row above the age
+// line and the badges (rows 112-127).
+#define GRID_PRICE_TOP    21
+#define GRID_PRICE_H      25
+
+// Width of `text` in the font of step 0 / 1 / 2 = 18 / 12 / 9 pt (grid_fit_price's measure).
+static int16_t grid_measure(const char* text, uint8_t font_step, void*) {
+    static const GFXfont* const kF[] = { &FreeSansBold18pt7b, &FreeSansBold12pt7b, &FreeSansBold9pt7b };
+    canvas.setFont(kF[font_step < 3 ? font_step : 2]);
+    int16_t bx, by; uint16_t bw, bh;
+    canvas.getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
+    return (int16_t)bw;
+}
+
+static void draw_grid_cell(int16_t x, int16_t y, const GridCell& c) {
+    static const GFXfont* const kBadge[] = { &FreeSansBold12pt7b, &FreeSansBold9pt7b };
+    int16_t bx, by; uint16_t bw, bh;
+    const int16_t right = x + GRID_CELL_W - 1 - GRID_CELL_PAD;
+    // row A: the badge ...
+    char buf[TICKER_SHORT_MAX + 4];
+    const char* s = fit_text(c.short_label, kBadge, 2, GRID_BADGE_MAX_W - 2 * GRID_BADGE_PAD, 0, 0, buf, sizeof(buf));
+    canvas.getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
+    canvas.fillRect(x, y, (int16_t)bw + 2 * GRID_BADGE_PAD, GRID_BADGE_H, CV_BLACK);
+    canvas.setTextColor(CV_WHITE);
+    canvas.setCursor(x + GRID_BADGE_PAD - bx, y + (GRID_BADGE_H - (int16_t)bh) / 2 - by);
+    canvas.print(s);
+    canvas.setTextColor(CV_BLACK);
+    // ... and the change, or "?" when this cycle missed the source
+    if (!c.ok) {
+        canvas.setFont(&FreeSansBold12pt7b);
+        canvas.getTextBounds("?", 0, 0, &bx, &by, &bw, &bh);
+        canvas.setCursor(right - (int16_t)bw - bx, y + (GRID_BADGE_H - (int16_t)bh) / 2 - by);
+        canvas.print("?");
+    } else if (c.change[0]) {
+        canvas.setFont(&FreeSansBold9pt7b);
+        canvas.getTextBounds(c.change, 0, 0, &bx, &by, &bw, &bh);
+        int16_t cx = right - (int16_t)bw;
+        canvas.setCursor(cx - bx, y + (GRID_BADGE_H - (int16_t)bh) / 2 - by);
+        canvas.print(c.change);
+        draw_dir(cx - 15, y + (GRID_BADGE_H - 6) / 2, c.dir);
+    }
+    // row B: the price, centred in the price band
+    if (c.price[0]) {
+        char trimmed[GRID_PRICE_MAX];
+        const char* p;
+        uint8_t step = grid_fit_price(c.price, GRID_CELL_W - 2 * GRID_CELL_PAD, grid_measure, nullptr, trimmed, sizeof(trimmed), &p);
+        grid_measure(p, step <= 1 ? 0 : step - 1, nullptr);   // selects the step's font
+        canvas.getTextBounds(p, 0, 0, &bx, &by, &bw, &bh);
+        canvas.setCursor(right - (int16_t)bw - bx, y + GRID_PRICE_TOP + (GRID_PRICE_H - (int16_t)bh) / 2 - by);
+        canvas.print(p);
+    }
+}
+
+// The grid frame; `badges_x` = where the badges begin (the age line stops 6 px before it).
+static void draw_grid(int16_t badges_x) {
+    static const GFXfont* const kSmall[] = { &FreeSansBold9pt7b };
+    canvas.drawFastVLine(GRID_CELL_W, 0, SCREEN_H, CV_BLACK);
+    canvas.drawFastHLine(0, GRID_CELL_H, SCREEN_W, CV_BLACK);
+    const uint8_t cells = grid_ticker_cells(_grid.n);
+    for (uint8_t i = 0; i < cells; i++) {
+        int16_t x, y;
+        grid_cell_origin(i, &x, &y);
+        draw_grid_cell(x, y, _grid.cells[i]);
+    }
+    char age[24];
+    uint32_t a = ticker_total_age_s();
+    ticker_age_line(a, a >= _stale_ms / 1000, age, sizeof(age));
+    if (age[0]) {
+        const int16_t x = GRID_CELL_W + 1 + GRID_CELL_PAD;
+        print_fitted(age, x, SCREEN_H - 3, kSmall, 1, badges_x - 6 - x);
     }
 }
 
@@ -702,14 +794,19 @@ static void draw_base(uint8_t event) {
         if (_card == CARD_POWER_BATTERY) event = RP_EV_SERVICE;
         else { event = RP_EV_CONDITION; condition = true; }
     } else {
-        bool has = _last_title[0] || _last_message[0];
-        if (has) draw_content();
-        else draw_waiting();
-        draw_badges();
+        bool has = _last_title[0] || _last_message[0] || _grid_on;
+        if (_grid_on) draw_grid(draw_badges());         // the badges first: the age line fits before them
+        else {
+            if (has) draw_content();
+            else draw_waiting();
+            draw_badges();
+        }
         _state = has ? SCREEN_CONTENT : SCREEN_WAITING;
-        kind = has ? (_tk.ticker ? SHOWN_TICKER : SHOWN_TEXT) : SHOWN_WAITING;
-        // the title and the badge name: another name on the badge is a layout change too
-        if (_tk.ticker) {
+        kind = has ? (_grid_on ? SHOWN_GRID : _tk.ticker ? SHOWN_TICKER : SHOWN_TEXT) : SHOWN_WAITING;
+        // the title and the badge name: another name on the badge is a layout change too;
+        // for the grid the set and order of the names
+        if (_grid_on) title = grid_set_key(&_grid);
+        else if (_tk.ticker) {
             title = esp_rom_crc32_le(0, (const uint8_t*)_last_title, strlen(_last_title));
             title = esp_rom_crc32_le(title, (const uint8_t*)_tk.short_label, strlen(_tk.short_label));
         }
@@ -853,11 +950,33 @@ void display_show_content(const char* title, const char* message, const TickerFi
     strlcpy(_last_message, message, sizeof(_last_message));
     if (t && t->ticker) _tk = *t;
     else { memset(&_tk, 0, sizeof(_tk)); _tk.age_s = TICKER_AGE_UNKNOWN; }
+    _grid_on = false;
     _content_at_ms = millis();
     if (!_content_at_ms) _content_at_ms = 1;
     _stale_fired = false;   // new content: its own crossing may ask once more
     _content_seq++;
     _card = CARD_NONE;      // new content replaces a card; device_state decides whether it returns
+    draw_base(RP_EV_CONTENT);
+}
+
+void display_show_grid(const GridFrame* g) {
+    _grid = *g;
+    if (_grid.n > GRID_MAX) _grid.n = GRID_MAX;
+    _grid_on = true;
+    _last_title[0] = '\0';                       // the symbols, comma-separated: the shelf's Showing line
+    for (uint8_t i = 0; i < _grid.n; i++) {
+        if (i) strlcat(_last_title, ", ", sizeof(_last_title));
+        strlcat(_last_title, _grid.cells[i].symbol, sizeof(_last_title));
+    }
+    _last_message[0] = '\0';
+    memset(&_tk, 0, sizeof(_tk));
+    _tk.ticker = true;                           // the age line and the stale crossing work as for one ticker
+    _tk.age_s = g->age_s;
+    _content_at_ms = millis();
+    if (!_content_at_ms) _content_at_ms = 1;
+    _stale_fired = false;
+    _content_seq++;
+    _card = CARD_NONE;
     draw_base(RP_EV_CONTENT);
 }
 
@@ -869,6 +988,7 @@ void display_clear_content() {
     _last_title[0] = '\0';
     _last_message[0] = '\0';
     _tk.ticker = false;
+    _grid_on = false;
     _content_at_ms = 0;
     _stale_fired = false;
 }
@@ -954,6 +1074,7 @@ void display_get_state(DisplayState* out) {
     out->status = _status;
     out->ticker = _tk.ticker ? &_tk : nullptr;
     out->ticker_age_s = _tk.ticker ? ticker_total_age_s() : 0;
+    out->grid = _grid_on ? &_grid : nullptr;
 }
 
 void display_prepare_sleep() {

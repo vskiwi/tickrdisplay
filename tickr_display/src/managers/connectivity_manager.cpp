@@ -6,6 +6,7 @@
 #include <esp_system.h>
 #include <esp_wifi.h>
 #include <esp_task_wdt.h>
+#include <esp_rom_crc.h>
 #include "ota_manager.h"
 #include "arduino_ota.h"
 #include "wifi_portal.h"
@@ -334,7 +335,7 @@ bool ConnectivityManager::on_wifi_connected(bool low_power) {
 // only as "set / not set" flags, never returned.
 void ConnectivityManager::handle_config_api(AsyncWebServerRequest* request) {
     REQUIRE_AUTH(request);
-    DynamicJsonDocument doc(1536);
+    DynamicJsonDocument doc(3072);   // 48 row keys are copied (~0.6 KB) on top of the flat fields
     doc["mqtt_server"]      = _config.mqtt_server;
     doc["mqtt_port"]        = _config.mqtt_port;
     doc["mqtt_topic"]       = _config.mqtt_topic;
@@ -351,20 +352,28 @@ void ConnectivityManager::handle_config_api(AsyncWebServerRequest* request) {
     doc["adc_cell_den"]     = _config.adc_cell_den;
     doc["led_rule"]         = led_rule_str(_config.led_rule);   // "off" | "sign" (docs/TICKERS.md "What the screen shows")
     // Content source (schema 8, docs/TICKERS.md "Presets"): the editor pre-fills its Ticker form from these.
-    const SourceSpec& t = _config.ticker;
+    // The grid (schema 9): tk_view, tk_n and rows 1..3 as tk1_* ... tk3_* (flat, like the POST fields).
     doc["source_kind"]      = source_kind_str(_config.source_kind);
-    doc["tk_preset"]        = source_preset_str(t.preset);
-    doc["tk_symbol"]        = t.symbol;
-    doc["tk_market"]        = t.market;
-    doc["tk_url"]           = t.url;
-    doc["tk_price"]         = t.path_price;
-    doc["tk_change"]        = t.path_change;
-    doc["tk_spark"]         = t.path_spark;
-    doc["tk_mode"]          = source_change_mode_str(t.change_mode);
-    doc["tk_decimals"]      = t.decimals;                        // 255 = auto
-    doc["tk_sep"]           = source_sep_str(t.sep);
-    doc["tk_label"]         = t.label;
-    doc["tk_short"]         = t.short_label;                     // "" = derived from the symbol (Test returns it)
+    doc["tk_view"]          = source_view_str(_config.tk_view);
+    doc["tk_n"]             = _config.tk_n;
+    for (uint8_t i = 0; i < SRC_ROWS_MAX; i++) {
+        const SourceSpec& t = config_ticker_row(_config, i);
+        char k[20];
+        #define K(f) (source_row_key(i, f, k, sizeof(k)), k)   // a char* key is copied into the document
+        doc[K("preset")]   = source_preset_str(t.preset);
+        doc[K("symbol")]   = t.symbol;
+        doc[K("market")]   = t.market;
+        doc[K("url")]      = t.url;
+        doc[K("price")]    = t.path_price;
+        doc[K("change")]   = t.path_change;
+        doc[K("spark")]    = t.path_spark;
+        doc[K("mode")]     = source_change_mode_str(t.change_mode);
+        doc[K("decimals")] = t.decimals;                         // 255 = auto
+        doc[K("sep")]      = source_sep_str(t.sep);
+        doc[K("label")]    = t.label;
+        doc[K("short")]    = t.short_label;                      // "" = derived from the symbol (Test returns it)
+        #undef K
+    }
     doc["tk_api_key_set"]   = _config.tk_api_key[0] != '\0';    // reserved; the key itself never leaves the device
     String body;
     serializeJson(doc, body);
@@ -414,40 +423,46 @@ static void enum_field(AsyncWebServerRequest* request, const char* name, uint8_t
 }
 
 // The ticker source (schema 8, docs/TICKERS.md "Presets") from form parameters -
-// POST /config saves them, POST /api/source/test fetches them once. `kind`
-// may be NULL (the test has no source_kind). Only the parameters present
-// change anything; errors are appended to `err`.
-void ConnectivityManager::parse_source_params(AsyncWebServerRequest* request, uint8_t* kind, SourceSpec& tk, String& err) {
+// POST /config saves them, POST /api/source/test fetches them once. `idx` is
+// the grid row: 0 reads the plain tk_* fields, 1..3 the tk1_* ... fields of
+// the same names (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid").
+// Only the parameters present change anything; errors are appended to `err`
+// under the field's own name. `must_resolve`: the row is (or becomes) a pull
+// target, so it has to resolve to a URL.
+void ConnectivityManager::parse_source_params(AsyncWebServerRequest* request, SourceSpec& tk, String& err, uint8_t idx, bool must_resolve) {
     String v;
-    if (kind) enum_field(request, "source_kind", source_kind_parse, source_kind_str, kind, err);
-    enum_field(request, "tk_preset", source_preset_parse, source_preset_str, &tk.preset, err);
-    enum_field(request, "tk_mode", source_change_mode_parse, source_change_mode_str, &tk.change_mode, err);
-    enum_field(request, "tk_sep", source_sep_parse, source_sep_str, &tk.sep, err);
-    copy_field(request, "tk_symbol", tk.symbol, sizeof(tk.symbol), false, err);
-    copy_field(request, "tk_market", tk.market, sizeof(tk.market), false, err);
-    copy_field(request, "tk_url", tk.url, sizeof(tk.url), false, err);
-    copy_field(request, "tk_price", tk.path_price, sizeof(tk.path_price), false, err);
-    copy_field(request, "tk_change", tk.path_change, sizeof(tk.path_change), false, err);
-    copy_field(request, "tk_spark", tk.path_spark, sizeof(tk.path_spark), false, err);
-    copy_field(request, "tk_label", tk.label, sizeof(tk.label), true, err);
-    copy_field(request, "tk_short", tk.short_label, sizeof(tk.short_label), false, err);   // <= 7 printable, no spaces
+    char k[20];
+    #define K(f) (source_row_key(idx, f, k, sizeof(k)), k)
+    enum_field(request, K("preset"), source_preset_parse, source_preset_str, &tk.preset, err);
+    enum_field(request, K("mode"), source_change_mode_parse, source_change_mode_str, &tk.change_mode, err);
+    enum_field(request, K("sep"), source_sep_parse, source_sep_str, &tk.sep, err);
+    copy_field(request, K("symbol"), tk.symbol, sizeof(tk.symbol), false, err);
+    copy_field(request, K("market"), tk.market, sizeof(tk.market), false, err);
+    copy_field(request, K("url"), tk.url, sizeof(tk.url), false, err);
+    copy_field(request, K("price"), tk.path_price, sizeof(tk.path_price), false, err);
+    copy_field(request, K("change"), tk.path_change, sizeof(tk.path_change), false, err);
+    copy_field(request, K("spark"), tk.path_spark, sizeof(tk.path_spark), false, err);
+    copy_field(request, K("label"), tk.label, sizeof(tk.label), true, err);
+    copy_field(request, K("short"), tk.short_label, sizeof(tk.short_label), false, err);   // <= 7 printable, no spaces
     if (!is_token(tk.symbol) || !is_token(tk.market) || !is_token(tk.path_price) || !is_token(tk.path_change) || !is_token(tk.path_spark)) {
-        err += "tk_symbol/market/price/change/spark: letters, digits, . _ - only. ";
+        err += K("symbol"); err += "/market/price/change/spark: letters, digits, . _ - only. ";
     }
-    if (strpbrk(tk.url, "\"\\") || strpbrk(tk.label, "\"\\") || strpbrk(tk.short_label, "\"\\")) err += "tk_url / tk_label / tk_short: no quotes or backslashes. ";
+    if (strpbrk(tk.url, "\"\\") || strpbrk(tk.label, "\"\\") || strpbrk(tk.short_label, "\"\\")) { err += K("url"); err += " / label / short: no quotes or backslashes. "; }
     if (tk.url[0] && strncasecmp(tk.url, "http://", 7) != 0 && strncasecmp(tk.url, "https://", 8) != 0) {
-        err += "tk_url: must start with http:// or https://. ";
+        err += K("url"); err += ": must start with http:// or https://. ";
     }
-    if (getp(request, "tk_decimals", v)) {
+    if (getp(request, K("decimals"), v)) {
         long d = v == "auto" ? SRC_DECIMALS_AUTO : v.toInt();
-        if (d != SRC_DECIMALS_AUTO && (d < 0 || d > SRC_DECIMALS_MAX || !isdigit((unsigned char)v[0]))) err += "tk_decimals: auto or 0..6. ";
+        if (d != SRC_DECIMALS_AUTO && (d < 0 || d > SRC_DECIMALS_MAX || !isdigit((unsigned char)v[0]))) { err += K("decimals"); err += ": auto or 0..6. "; }
         else tk.decimals = (uint8_t)d;
     }
     // ticker = the pull target: it must resolve to a URL
     SourcePlan plan;
-    if ((!kind || *kind == SRC_KIND_TICKER) && !source_resolve(tk, &plan)) {
-        err += tk.preset == SRC_PRESET_CUSTOM ? "ticker: URL and price path required. " : "ticker: symbol required. ";
+    if (must_resolve && !source_resolve(tk, &plan)) {
+        if (idx) { err += "ticker "; err += (unsigned)(idx + 1); err += ": "; } else err += "ticker: ";
+        err += tk.preset == SRC_PRESET_CUSTOM ? "URL and price path required. " : "symbol required. ";
     }
+    #undef K
 }
 
 void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
@@ -499,7 +514,18 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
     // Content source (schema 8, docs/TICKERS.md "Presets"). The editor posts only the
     // fields of the chosen source; everything else keeps its value.
     bool has_kind = request->hasParam("source_kind", true);
-    parse_source_params(request, &nc.source_kind, nc.ticker, err);
+    enum_field(request, "source_kind", source_kind_parse, source_kind_str, &nc.source_kind, err);
+    // The grid (schema 9): view, number of rows, then every row - the rows a
+    // grid shows must resolve, the others are stored as posted.
+    enum_field(request, "tk_view", source_view_parse, source_view_str, &nc.tk_view, err);
+    if (getp("tk_n", v)) {
+        long n = v.toInt();
+        if (n < 1 || n > SRC_ROWS_MAX) err += "tk_n: must be 1..4. ";
+        else nc.tk_n = (uint8_t)n;
+    }
+    const bool is_ticker = nc.source_kind == SRC_KIND_TICKER;
+    const uint8_t rows = config_ticker_rows(nc);
+    for (uint8_t i = 0; i < SRC_ROWS_MAX; i++) parse_source_params(request, config_ticker_row(nc, i), err, i, is_ticker && i < rows);
     if (request->hasParam("tk_api_key_clear", true)) {
         nc.tk_api_key[0] = '\0';
     } else if (getp("tk_api_key", v) && v.length() > 0) {
@@ -576,7 +602,9 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
     }
     // A changed Pull URL / ticker source / interval fetches at once on USB (main.cpp polls the flag).
     if (strcmp(nc.pull_url, _config.pull_url) != 0 || nc.refresh_interval_min != _config.refresh_interval_min ||
-        nc.source_kind != _config.source_kind || memcmp(&nc.ticker, &_config.ticker, sizeof(SourceSpec)) != 0) {
+        nc.source_kind != _config.source_kind || memcmp(&nc.ticker, &_config.ticker, sizeof(SourceSpec)) != 0 ||
+        nc.tk_view != _config.tk_view || nc.tk_n != _config.tk_n ||
+        memcmp(nc.tickers_more, _config.tickers_more, sizeof(nc.tickers_more)) != 0) {
         _pull_reconfigure = true;
     }
     _config = nc;
@@ -745,7 +773,7 @@ void ConnectivityManager::handle_identity_get(AsyncWebServerRequest* request) {
         "\"screen\":{\"width\":296,\"height\":128,\"format\":\"1bpp-msb\"},"
         "\"caps\":[\"screen_raw\",\"screen_bmp\",\"peers_v1\",\"pair_v1\",\"layout_v1\",\"relay_v1\",\"update_url_v1\"],\"max_peers\":%u,\"uptime_s\":%lu}",
         id, name, WiFi.macAddress().c_str(), WiFi.localIP().toString().c_str(), TICKR_FW_VERSION,
-        usb ? "usb" : "battery", power_board_str(), usb ? 0 : _config.refresh_interval_min * 60,
+        usb ? "usb" : "battery", power_board_str(), usb ? 0 : (int)(batteryIntervalMin() * 60u),
         relay_is_relay() ? "true" : "false",
         usb ? "true" : "false",                 // pairable = USB power only
         group,
@@ -1310,7 +1338,111 @@ bool ConnectivityManager::fetch_source(const SourcePlan& plan, bool custom, Sour
 RTC_DATA_ATTR static char     s_funding_last[TICKER_TIME_MAX] = "";
 RTC_DATA_ATTR static uint32_t s_funding_key = 0;
 
+// Last good cell values of the grid (docs/TICKERS.md "Several tickers on one
+// panel: the 2x2 grid"): a source that fails a cycle keeps its price on the
+// frame, on battery also across deep sleep. RTC_NOINIT_ATTR with a CRC like
+// the frame copy in hal_display.cpp (.rtc_noinit costs no image bytes;
+// random memory after a power-on fails the CRC). `key[i]` identifies the
+// source of cell i (hash of its URL): a changed row starts its cell empty.
+struct GridLast {
+    GridFrame frame;
+    uint32_t  key[GRID_MAX];
+    uint32_t  crc;
+};
+RTC_NOINIT_ATTR static GridLast s_grid_last;
+static uint32_t grid_last_crc() {
+    return esp_rom_crc32_le(0, (const uint8_t*)&s_grid_last, offsetof(GridLast, crc));
+}
+
+// One fetch cycle of the grid: every row in turn (the task watchdog fed in
+// between), then ONE frame - never a frame per source, four partials would
+// run into the 30 s spacing (docs/DEVICE_UI.md "E-ink refresh rules"). The
+// cycle succeeds when at least one source did; a source that failed keeps
+// its last price with ok = false ("?" in place of the change), last_error
+// names the last failing row ("pull: #2 http 451"). The age line follows
+// the oldest quote fetched on this boot. No sparkline history in the grid.
+bool ConnectivityManager::fetch_grid() {
+    const uint8_t n = config_ticker_rows(_config);
+    GridFrame* g = (GridFrame*)calloc(1, sizeof(GridFrame));
+    SourceResult* res = (SourceResult*)malloc(sizeof(SourceResult));
+    if (!g || !res) {
+        free(g);
+        free(res);
+        setLastError("pull: out of memory");
+        return false;
+    }
+    static uint32_t s_cell_at_ms[GRID_MAX];                 // when cell i last succeeded on this boot (0 = not yet)
+    const bool last_ok = s_grid_last.crc == grid_last_crc();
+    const uint32_t t0 = millis();
+    uint8_t ok_n = 0;
+    char err[SRC_ERR_MAX + 16] = "";
+    for (uint8_t i = 0; i < n; i++) {
+        GridCell& c = g->cells[i];
+        const SourceSpec& spec = config_ticker_row(_config, i);
+        strlcpy(c.symbol, spec.symbol, sizeof(c.symbol));
+        SourcePlan plan;
+        if (!source_resolve(spec, &plan)) {
+            snprintf(err, sizeof(err), "pull: #%u not configured", (unsigned)(i + 1));
+            s_grid_last.key[i] = 0;
+            s_cell_at_ms[i] = 0;
+            continue;
+        }
+        strlcpy(c.short_label, plan.short_label[0] ? plan.short_label : plan.label, sizeof(c.short_label));
+        const uint32_t key = spark_hist_key(plan.url);
+        if (last_ok && s_grid_last.key[i] == key && s_grid_last.frame.cells[i].has) {
+            const GridCell& p = s_grid_last.frame.cells[i];       // the last good values of the same source
+            strlcpy(c.price, p.price, sizeof(c.price));
+            strlcpy(c.change, p.change, sizeof(c.change));
+            c.dir = p.dir;
+            c.has = true;
+        } else {
+            s_cell_at_ms[i] = 0;
+        }
+        s_grid_last.key[i] = key;
+        if (i) esp_task_wdt_reset();                             // up to four bounded GETs in one loop() pass
+        char cerr[SRC_ERR_MAX + 8];
+        uint32_t ms = 0;
+        if (fetch_source(plan, spec.preset == SRC_PRESET_CUSTOM, res, cerr, sizeof(cerr), &ms)) {
+            strlcpy(c.price, res->price, sizeof(c.price));
+            if (res->has_change) { strlcpy(c.change, res->change, sizeof(c.change)); c.dir = res->dir; }
+            else { c.change[0] = '\0'; c.dir = 0; }
+            c.ok = c.has = true;
+            ok_n++;
+            s_cell_at_ms[i] = millis() ? millis() : 1;
+        } else {
+            snprintf(err, sizeof(err), "pull: #%u %s", (unsigned)(i + 1), strncmp(cerr, "pull: ", 6) == 0 ? cerr + 6 : cerr);
+            Serial.printf("Grid: #%u failed - %s (%lu ms)\n", (unsigned)(i + 1), cerr, (unsigned long)ms);
+        }
+    }
+    g->n = n;
+    uint32_t age = 0;
+    for (uint8_t i = 0; i < n; i++) {
+        if (!s_cell_at_ms[i]) continue;
+        uint32_t a = (millis() - s_cell_at_ms[i]) / 1000;
+        if (a > age) age = a;
+    }
+    g->age_s = age;
+    Serial.printf("Grid: %u of %u fetched (%lu ms)\n", (unsigned)ok_n, (unsigned)n, (unsigned long)(millis() - t0));
+    if (ok_n) {
+        if (ok_n == n) { if (strncmp(_last_error, "pull:", 5) == 0) _last_error[0] = '\0'; }
+        else setLastError(err);
+        // The LED rule follows the first ticker's direction (docs/TICKERS.md "What the screen shows").
+        uint8_t r, gg, b;
+        const GridCell& c0 = g->cells[0];
+        if (ticker_led_decide(renderer_led_rule(), false, 0, 0, 0, c0.ok && c0.change[0], c0.dir, &r, &gg, &b)) indication_led_rgb(r, gg, b);
+        display_show_grid(g);
+        s_grid_last.frame = *g;
+        s_grid_last.crc = grid_last_crc();
+    } else {
+        setLastError(err);
+    }
+    free(res);
+    free(g);
+    return ok_n > 0;
+}
+
 bool ConnectivityManager::fetch_ticker() {
+    if (config_ticker_rows(_config) > 1) return fetch_grid();
     SourcePlan plan;
     if (!source_resolve(_config.ticker, &plan)) {
         setLastError("pull: ticker not configured");
@@ -1398,7 +1530,7 @@ void ConnectivityManager::handle_source_test(AsyncWebServerRequest* request) {
     SourceSpec s;
     source_spec_defaults(&s);
     String err;
-    parse_source_params(request, nullptr, s, err);
+    parse_source_params(request, s, err, 0, true);
     if (err.length() > 0) {
         send_json_error(request, 400, err.c_str());
         return;
@@ -1445,4 +1577,13 @@ const char* ConnectivityManager::pullSourceStr() const {
 
 const char* ConnectivityManager::tickerSymbol() const {
     return source_pull_kind(_config.source_kind, _config.pull_url[0] != '\0') == SRC_KIND_TICKER ? _config.ticker.symbol : "";
+}
+
+bool ConnectivityManager::gridActive() const {
+    return source_pull_kind(_config.source_kind, _config.pull_url[0] != '\0') == SRC_KIND_TICKER && config_ticker_rows(_config) > 1;
+}
+
+uint32_t ConnectivityManager::batteryIntervalMin() const {
+    int iv = _config.refresh_interval_min;
+    return grid_battery_interval_min(gridActive(), iv <= 0 ? 60u : (uint32_t)iv);
 }

@@ -136,12 +136,21 @@ static void handle_state(AsyncWebServerRequest* request) {
              (unsigned long)st.refreshes_full, (unsigned long)st.refreshes_partial,
              (unsigned long)st.refreshes_skipped, (unsigned long)st.last_full_s, (unsigned)st.partials_since_full);
     body += num;
-    // Ticker fields (additive): layout text|ticker; for a ticker frame also change, dir
-    // (-1|0|1) and age_s (the quote's total age: payload age_s + time on the panel).
+    // Ticker fields (additive): layout text|ticker|grid; for a ticker frame also change, dir
+    // (-1|0|1) and age_s (the quote's total age: payload age_s + time on the panel);
+    // for a grid frame symbols[] and shorts[] in cell order (docs/TICKERS.md
+    // "Several tickers on one panel: the 2x2 grid") and age_s of the oldest quote.
     body += ",\"layout\":\"";
-    body += st.ticker ? "ticker" : "text";
+    body += st.grid ? "grid" : st.ticker ? "ticker" : "text";
     body += '"';
-    if (st.ticker) {
+    if (st.grid) {
+        body += ",\"symbols\":[";
+        for (uint8_t i = 0; i < st.grid->n; i++) { if (i) body += ','; json_str(body, st.grid->cells[i].symbol); }
+        body += "],\"shorts\":[";
+        for (uint8_t i = 0; i < st.grid->n; i++) { if (i) body += ','; json_str(body, st.grid->cells[i].short_label); }
+        snprintf(num, sizeof(num), "],\"age_s\":%lu", (unsigned long)st.ticker_age_s);
+        body += num;
+    } else if (st.ticker) {
         body += ",\"change\":"; json_str(body, st.ticker->change);
         body += ",\"short\":"; json_str(body, st.ticker->short_label);   // the badge name, "" = no badge
         snprintf(num, sizeof(num), ",\"dir\":%d,\"age_s\":%lu", (int)st.ticker->dir, (unsigned long)st.ticker_age_s);

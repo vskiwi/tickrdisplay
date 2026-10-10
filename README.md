@@ -30,7 +30,8 @@ The stock TickrMeter is a thin client of the vendor's cloud: the cloud picks the
 | **Push your own content** | Not possible | **`POST /api/screen`**, **MQTT**, or a **Pull URL** – title + value, LED colour, sound |
 | **Light bar** | Red/green by gain or loss | Red/green by sign of change, or any RGB colour per payload (8-bit PWM per channel) |
 | **Sound** | Beep on price alerts | Beep presets and **RTTTL ring-tone melodies** per payload |
-| **Price alerts / playlist mode** | Yes | **Not implemented** (one symbol per device; alerts are left to your automation) |
+| **Several symbols** | Playlist: one symbol at a time, rotating | **2×2 grid**: up to four tickers side by side – name badge, change, price per cell – from any mix of presets; no rotation |
+| **Price alerts** | Yes | **Not implemented** (alerts are left to your automation) |
 | **Several devices** | Managed per account; no arrangement or preview | **LAN discovery**, live e-ink previews, **drag-and-drop shelf**, groups joined by a code on the screen, *For all…* content, relay for sleeping battery devices, group firmware update |
 | **Local web UI / API** | Only the Wi-Fi set-up portal, and only in access-point mode | Full web UI on `http://<device-ip>/` + JSON HTTP API with CORS, usable from Home Assistant, curl, scripts |
 | **Firmware updates** | Cloud-pull only | Browser upload, `curl`, or fetch-from-URL; dual-slot with **return to stock** |
@@ -108,7 +109,7 @@ The e-ink frame is also available as `http://<device-ip>/api/screen.bmp` for a p
 
 ## Tickers and data sources
 
-The *Ticker* source runs entirely on the device: it fetches one symbol from **CoinGecko**, **Kraken** or **Binance** every refresh interval over HTTPS, extracts price and 24 h change with a mini-JSONPath, formats the price and keeps a 48-point sparkline history in RTC memory across deep sleep. *Custom JSON* takes any URL (`{s}`/`{m}` expanded) and your own price/change/spark paths – the response must be JSON ≤ 4 KB. *Test* runs one fetch on the device before you save. Rate limits and geo-blocking (Binance answers `http 451` from some regions) are the exchanges' – the editor's hints name them.
+The *Ticker* source runs entirely on the device: it fetches a symbol – or up to four for the **2×2 grid** – from **CoinGecko**, **Kraken** or **Binance** every refresh interval over HTTPS, extracts price and 24 h change with a mini-JSONPath, formats the price and keeps a 48-point sparkline history in RTC memory across deep sleep. *Custom JSON* takes any URL (`{s}`/`{m}` expanded) and your own price/change/spark paths – the response must be JSON ≤ 4 KB. *Test* runs one fetch on the device before you save. Rate limits and geo-blocking (Binance answers `http 451` from some regions) are the exchanges' – the editor's hints name them.
 
 **TLS:** the presets and a *Custom JSON* ticker URL are **always verified** – against your uploaded root CA when present, else against the roots baked into the firmware (DigiCert Global Root G2, GTS Root R4, GlobalSign Root CA, ISRG Root X1); a chain that does not verify is a failed fetch, never an unverified connection. Only the legacy *Custom JSON URL* Pull source is fetched unverified when no CA is uploaded – the UI flags it as INSECURE.
 
@@ -190,7 +191,7 @@ Everything below exists in the firmware and is covered by host tests where a pur
 * **Group secret rotation and re-pairing** – *Rotate secret* across two devices, moving a member to another group, and the *Paired: …* / *Pairing failed* outcome frames ([`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md)).
 * **Fleets larger than two** – beacon period adaptation, peer-table eviction and the preview scheduler with tens of devices ([`docs/MULTI_DEVICE.md`](docs/MULTI_DEVICE.md)).
 * **Real phones** – touch drag, bottom sheets and the captive-portal sheet opening `/wifi` by itself; the recovery actions from a phone joined to the `TickrDisplay` access point; the battery-power recovery frames ([`docs/WEB_UI.md`](docs/WEB_UI.md)).
-* **Name badge ghosting** – the black badge with the ticker's short name over a long run of partial refreshes and in a cold room has not been watched for ghosting ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
+* **Name badge and grid ghosting** – the black badge with the ticker's short name, and the 2×2 grid with four changing cells and four badges, over a long run of partial refreshes and in a cold room have not been watched for ghosting ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)); the grid on a battery device (15-minute floor, four fetches per wake, the last cell values across deep sleep) is host-tested only ([`docs/TICKERS.md`](docs/TICKERS.md)).
 * **Device sheet write actions with a token** – *Change…* → Send / Save, *Rename*, *Move*, *Clear pending*, *Test LED & sound*, *Forget* ([`docs/WEB_UI.md`](docs/WEB_UI.md)); cosmetic judgements of the LED breathe / amber tint and the optional double full refresh after a long-lived card ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
 * **Other hardware** – board revisions other than A and B are unknown; open an issue with `esptool.py flash_id` and `/api/power/raw` if yours differs.
 * **Windows upload script** – `scripts/flash_ota.ps1` has not been run on a Windows machine; the browser upload is the supported path ([`docs/FLASHING.md`](docs/FLASHING.md)).

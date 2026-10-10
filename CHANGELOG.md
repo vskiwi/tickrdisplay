@@ -10,6 +10,19 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ### Added
 
+- **Tickers**: a **2×2 grid** of up to four ticker sources on one panel –
+  each cell with the short-name badge, the change with its triangle and the
+  price (whole at 18 pt, else without its fraction, else smaller), the age
+  line and the badges in the last cell; two or three tickers use the same
+  cells. Any mix of presets. All sources are fetched in one cycle and drawn
+  in one frame; a source that fails keeps its last price with `?` in place
+  of the change, also across deep sleep; a changed set or order of tickers
+  is a full refresh. On battery the interval has a 15-minute floor with a
+  grid. Editor: *View* (one ticker / grid) with up to four rows – preset,
+  symbol, market, short name, reorder / remove, *Test* per row – and the
+  *Advanced* settings per row. API: `tk_view`, `tk_n`, `tk1_*` … `tk3_*`
+  in `/api/config` and `POST /config`; `/api/screen/state` reports
+  `layout: "grid"` with `symbols[]` and `shorts[]`.
 - **Tickers**: the ticker's short name on a black badge top left of the panel
   (`BTC`, `XBT`, `ETH` – up to 7 characters, 18 pt white on black, smaller
   when longer), with the change beside it and the price below. Derived from

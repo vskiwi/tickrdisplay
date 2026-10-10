@@ -57,6 +57,14 @@ static uint8_t parse_enum(const char* s, const char* const* tab, uint8_t n, uint
     if (s) for (uint8_t i = 0; i < n; i++) if (strcmp(s, tab[i]) == 0) return i;
     return def;
 }
+static const char* const kView[]   = {"single", "grid"};
+const char* source_view_str(uint8_t v)         { return kView[v < 2 ? v : 0]; }
+uint8_t     source_view_parse(const char* s)   { return parse_enum(s, kView, 2, SRC_VIEW_SINGLE); }
+uint8_t     source_rows_clamp(int n)           { return (uint8_t)(n < 1 || n > SRC_ROWS_MAX ? 1 : n); }
+void source_row_key(uint8_t idx, const char* field, char* out, size_t n) {
+    if (idx) snprintf(out, n, "tk%u_%s", (unsigned)idx, field);
+    else     snprintf(out, n, "tk_%s", field);
+}
 const char* source_kind_str(uint8_t v)         { return kKind[v < 5 ? v : 0]; }
 uint8_t     source_kind_parse(const char* s)   { return parse_enum(s, kKind, 5, SRC_KIND_NONE); }
 uint8_t source_pull_kind(uint8_t kind, bool has_pull_url) {

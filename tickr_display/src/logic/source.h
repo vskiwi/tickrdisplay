@@ -47,6 +47,19 @@ enum SourceChangeMode : uint8_t { SRC_CHG_PCT = 0, SRC_CHG_OPEN = 1 };
 // "thin space" of the design is a plain space on the device.
 enum SourceSep : uint8_t { SRC_SEP_SPACE = 0, SRC_SEP_COMMA, SRC_SEP_NONE };
 
+// How the ticker sources are laid out (AppConfig::tk_view, schema 9 - docs/TICKERS.md
+// "Several tickers on one panel: the 2x2 grid"): one source on the whole
+// panel, or up to four in a 2x2 grid.
+enum SourceView : uint8_t { SRC_VIEW_SINGLE = 0, SRC_VIEW_GRID = 1 };
+#define SRC_ROWS_MAX 4                 // tk_n: sources in the grid (= GRID_MAX)
+const char* source_view_str(uint8_t v);       uint8_t source_view_parse(const char* s);      // unknown -> single
+// tk_n clamped to 1..SRC_ROWS_MAX (anything odd, including an older file without one, -> 1).
+uint8_t source_rows_clamp(int n);
+// The form / JSON key of a field of source row `idx`: row 0 keeps the
+// plain "tk_<field>" of the single source, rows 1..3 are "tk1_<field>" ...
+// ("symbol" -> "tk_symbol", "tk2_symbol"). `out` needs 4 + strlen(field) + 2.
+void source_row_key(uint8_t idx, const char* field, char* out, size_t n);
+
 const char* source_kind_str(uint8_t v);       uint8_t source_kind_parse(const char* s);      // unknown -> none
 // The pull target: `ticker` -> ticker; else a non-empty pull_url -> url
 // (this is also the schema < 8 migration, where no kind is stored: pull_url

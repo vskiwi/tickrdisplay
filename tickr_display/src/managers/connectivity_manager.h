@@ -38,6 +38,14 @@ public:
     // "ticker" | "url" | "none", and the ticker's symbol ("" otherwise) - for /api/screen/state.
     const char* pullSourceStr() const;
     const char* tickerSymbol() const;
+    // The 2x2 grid (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid"):
+    // true when the pull target is the ticker in the grid view with two or
+    // more sources - the fetch cycle makes that many requests and the
+    // on-battery interval has a floor (batteryIntervalMin()).
+    bool gridActive() const;
+    // The battery flow's sleep / fetch interval in minutes: refresh_interval_min,
+    // raised to GRID_BATT_MIN_MIN while a grid is active.
+    uint32_t batteryIntervalMin() const;
 
     // True once after POST /config changed the Pull URL / ticker source or the
     // interval (the USB pull scheduler fetches at once, docs/TICKERS.md "Fetch schedule and errors"); clears the flag.
@@ -105,5 +113,6 @@ private:
     bool fetch_ticker();
     void handle_source_test(AsyncWebServerRequest* request);
     void run_source_test();
-    void parse_source_params(AsyncWebServerRequest* request, uint8_t* kind, SourceSpec& tk, String& err);
+    bool fetch_grid();
+    void parse_source_params(AsyncWebServerRequest* request, SourceSpec& tk, String& err, uint8_t idx, bool must_resolve);
 };

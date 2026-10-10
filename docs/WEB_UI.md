@@ -60,10 +60,15 @@ it. Everything about the fleet is on the toolbar and in the drawer.
 2. Choose the **Source**: *Text*, *Ticker*, *Custom JSON URL*, *MQTT* or
    *Push only*. The selector opens on the source the device uses now.
 3. *Text*: title and value, optional *Reactions* (LED colour, sound preset,
-   volume, LED rule) → *Send*. *Ticker*: market preset (CoinGecko, Kraken,
-   Binance, Custom JSON), symbol / market, interval, optional *Test* (one
-   fetch on the device, nothing saved), *Advanced* (label, short name for
-   the panel badge, decimals, separator, LED rule) → *Save*. *Custom JSON URL*: URL + interval → *Save*.
+   volume, LED rule) → *Send*. *Ticker*: *View* (one ticker, or the 2×2
+   grid with up to four rows – preset, symbol, market, short name, ▲ ▼ ✕,
+   *Test* per row, *+ Add ticker*; the radio button picks the row whose
+   *Advanced* settings are shown), market preset (CoinGecko, Kraken,
+   Binance, Custom JSON), symbol / market, interval (a 15-minute floor on
+   battery with a grid), optional *Test* (one fetch on the device, nothing
+   saved), *Advanced* (label, short name for the panel badge, decimals,
+   separator, LED rule) → *Save* ([`TICKERS.md`](TICKERS.md) → *Setting it
+   up in the web UI*). *Custom JSON URL*: URL + interval → *Save*.
    *MQTT* shows broker and topic with a link to that device's `/system`;
    *Push only* shows a ready `curl` line.
 4. The card's next frame poll shows the result.
@@ -192,7 +197,8 @@ are the browser's clock – the device has none.
 * **Status** – rows shown only when known: Address, Power (+ cell voltage),
   Signal, Firmware, Uptime, MQTT, Relay, Pending (content / update), Token
   *none* (red), Error.
-* **Showing** – the screen state, or *source · title / value*, + *Change…*.
+* **Showing** – the screen state, or *source · title / value* (a grid's
+  title is its symbols, comma-separated), + *Change…*.
 * **Actions** – *Identify this* / *Stop identify*, *Rename*, *Move*, *Clear
   pending* (when the relay holds something); *Test LED & sound* disclosure
   (colour, brightness, *Off*; volume, *Beep* – a test only, the next payload

@@ -22,7 +22,7 @@ flickers never reaches the panel.
 
 | # | Screen | When | What is on it |
 |---|---|---|---|
-| 1 | **Content** | Every payload with `title`/`value` (text look) or with `change` / `spark` (ticker look, [`TICKERS.md`](TICKERS.md)) | Text: title 9 pt top-left; value centred, cascade 18 pt ×2 → 18 → 12 → 9, truncated with `...`. Ticker: the short name white on a black badge top left (rows 0–29, 18 pt → 12 → 9 to stay within 150 px) with the change 12 pt and its triangle at the right and the full label 9 pt in between only when it fits whole, price centred in rows 32–92; without a short name the title row is as for text (title left, change on the 9 pt row) and the price uses rows 18–92. Sparkline ≤ 200×24 bottom-left, age line 9 pt bottom-right – or, in its place, a payload's `time` string / the funding line of a Binance perpetual (`FR +0.0100%`, [`TICKERS.md`](TICKERS.md) → *Binance futures*). Badges bottom-right corner |
+| 1 | **Content** | Every payload with `title`/`value` (text look) or with `change` / `spark` (ticker look, [`TICKERS.md`](TICKERS.md)) | Text: title 9 pt top-left; value centred, cascade 18 pt ×2 → 18 → 12 → 9, truncated with `...`. Ticker: the short name white on a black badge top left (rows 0–29, 18 pt → 12 → 9 to stay within 150 px) with the change 12 pt and its triangle at the right and the full label 9 pt in between only when it fits whole, price centred in rows 32–92; without a short name the title row is as for text (title left, change on the 9 pt row) and the price uses rows 18–92. Sparkline ≤ 200×24 bottom-left, age line 9 pt bottom-right – or, in its place, a payload's `time` string / the funding line of a Binance perpetual (`FR +0.0100%`, [`TICKERS.md`](TICKERS.md) → *Binance futures*). Badges bottom-right corner. **Grid** (two to four ticker sources, [`TICKERS.md`](TICKERS.md) → *Several tickers on one panel: the 2×2 grid*): four cells of 148×64 with 1 px separators at x = 148 and y = 64; in a cell the name badge 12 pt (9 pt when wider than 70 px) in rows 0–19, the change 9 pt with its triangle right-aligned on the same row – `?` 12 pt for a source that failed this cycle – and the price right-aligned in rows 21–45 at 18 pt (whole, else without its fraction) → 12 → 9; rows 46–63 stay empty. Cells fill top left → top right → bottom left; the bottom-right cell holds the age line 9 pt (baseline 125, left-aligned at x = 153, cut before the badges) and the badges, plus the fourth ticker when there is one |
 | 2 | **WAITING** | No payload shown on this boot: after the first connect, after a service frame ends, on a battery device without a Pull URL | Panel icon 40×28; *Ready* 18 pt, *choose content at* 12 pt, `http://<ip>/` 12 pt (9 pt for a 15-char address); badges as on content |
 | 3 | **Badges** | Wi-Fi lost ≥ 60 s; bolt ↔ battery after 5 s of a stable new reading; **BATTERY LOW** at ≤ 15 % on battery with a known level | Right-aligned in rows 112–127: `[Wi-Fi lost] [NN%] [battery]` or `[Wi-Fi lost] [bolt]`; low = battery outline with an exclamation mark; outline only when the level is unknown (board `?`); **nothing** for `power: unknown` |
 | 4 | **BATTERY EMPTY** card | Battery mode, cell < 3300 mV; drawn once per discharge, then 60-min sleeps until the cell is > 3450 mV or USB is found | Empty battery glyph 80×40 above *Battery empty* 18 pt / *connect USB power* 12 pt. Never served by `/api/screen.*` – the device sleeps right after |
@@ -98,7 +98,9 @@ machine; it uses two helpers (`device_offline_card_due()`,
   level and the percentage in 9 pt; on USB the bolt is the only power mark.
   Ticker: the name badge is a filled black rectangle 6 px around the text,
   static for the life of a source – another name is a layout change (full
-  refresh, *E-ink refresh rules*). Price cascade 18 pt ×2 → 12 pt ×2 → 18 → 12 → 9 – a bare number
+  refresh, *E-ink refresh rules*); the grid's cell badges are 4 px around
+  the text, and the set and order of the names is the grid's title for the
+  same rule. Price cascade 18 pt ×2 → 12 pt ×2 → 18 → 12 → 9 – a bare number
   of 1 000 or more that misses 18 pt ×2 is retried there without its
   fraction before the cascade steps down ([`TICKERS.md`](TICKERS.md) →
   *What the screen shows*); the sparkline
@@ -251,7 +253,7 @@ be cleaned.
 | 24 h hygiene: `FULL_REFRESH_MAX_AGE_MS` without any refresh (`display_loop()` redraws the base frame) | **FULL**, never skipped |
 | Rendered frame equals the shown frame (any other event) | **NONE** |
 | Condition card in (OFFLINE / OTA / BATTERY EMPTY); boot frames (splash, *Restart N of 3*, *USB only*), SETUP and RECOVERY cards | **FULL** |
-| Layout kind changed (text ↔ ticker ↔ WAITING) or the ticker's source changed (its label or its badge name) against the last *base* frame | **FULL** |
+| Layout kind changed (text ↔ ticker ↔ grid ↔ WAITING) or the ticker's source changed (its label or its badge name; for the grid the set or order of the short names) against the last *base* frame | **FULL** |
 | Forced full: on USB `partials_since_full ≥ RP_FORCE_FULL_EVERY` (8) **or** `ms_since_full ≥ RP_FULL_MAX_AGE_MS` (60 min); on battery `partials_since_full ≥ RP_FORCE_FULL_BATT` (6) – a wake counter, there is no clock across sleeps | **FULL** |
 | Content / badge partial less than `RP_PARTIAL_MIN_MS` (30 s) after the previous partial – USB only; the first partial after a full is never held | **DEFER** |
 | Everything else: content of the same layout kind, badge change / stale crossing, identify, pairing code / outcome, the transitional ON BATTERY card, the base frame back after any card or service frame, a battery wake with a valid copy | **PARTIAL** |
@@ -263,9 +265,11 @@ tuned values in `refresh_policy.h`, not settings.
 **Event classes** (`RefreshEvent`): `CONTENT` (payload / MQTT / pull /
 ticker, also the WAITING card), `BADGE` (status_policy's minute rule
 already applied), `SERVICE` (identify, pairing, ON BATTERY card), `RESTORE`
-(base frame back), `CONDITION`, `BOOT`, `HYGIENE`. The layout kind is
-tracked for base content frames only, so the content back after OFFLINE
-compares against its own kind and comes back partial.
+(base frame back), `CONDITION`, `BOOT`, `HYGIENE`. The layout kind (text,
+ticker, grid, WAITING) is tracked for base content frames only, so the
+content back after OFFLINE compares against its own kind and comes back
+partial. A grid fetch cycle asks for one frame after all its sources, never
+one per source – four partials in a row would run into the 30 s spacing.
 
 **Refreshes per event:** new content of the same layout kind – 1 partial,
 every 9th a full, 0 when identical; layout or source change – 1 full;
@@ -388,4 +392,5 @@ frame, so the shelf shows the sleeper's last card.
 > **Unverified:** ghosting of the large inverted area of the name badge over
 > a long series of partial refreshes (up to 8 before the forced full) and in
 > a cold room, where the partial waveform has no temperature compensation,
-> has not been watched on the panel.
+> has not been watched on the panel; nor has the grid, where four prices
+> and four badges change under the same partial series.

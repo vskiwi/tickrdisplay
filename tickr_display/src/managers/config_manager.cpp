@@ -4,8 +4,8 @@
 
 static const char* CONFIG_FILE     = "/config.json";
 static const char* CONFIG_FILE_TMP = "/config.json.tmp";
-static const size_t CONFIG_FILE_MAX = 4096;   // config.json is ~1 KB; the parse buffer is a heap transient
-static const size_t CONFIG_DOC_SIZE = 2048;   // ArduinoJson document for load / save (heap transient)
+static const size_t CONFIG_FILE_MAX = 6144;   // config.json is ~1 KB, ~2 KB with three grid rows; the parse buffer is a heap transient
+static const size_t CONFIG_DOC_SIZE = 4096;   // ArduinoJson document for load / save (heap transient; a read copies every string)
 static const char* CA_FILE         = "/ca.pem";
 static const size_t CA_MAX_LEN     = 8192;
 
@@ -20,6 +20,39 @@ uint8_t config_power_source_parse(const char* s) {
     if (strcmp(s, "usb") == 0) return 1;
     if (strcmp(s, "battery") == 0) return 2;
     return 0;
+}
+
+// One ticker source <-> its tk_* keys: the flat keys of the file's root for
+// row 0, the same keys inside a `tickers[]` object for the grid rows.
+static void spec_load(JsonObjectConst o, SourceSpec& t) {
+    t.preset = source_preset_parse(o["tk_preset"] | "coingecko");
+    strlcpy(t.symbol, o["tk_symbol"] | "", sizeof(t.symbol));
+    strlcpy(t.market, o["tk_market"] | "", sizeof(t.market));
+    strlcpy(t.url, o["tk_url"] | "", sizeof(t.url));
+    strlcpy(t.path_price, o["tk_price"] | "", sizeof(t.path_price));
+    strlcpy(t.path_change, o["tk_change"] | "", sizeof(t.path_change));
+    strlcpy(t.path_spark, o["tk_spark"] | "", sizeof(t.path_spark));
+    t.change_mode = source_change_mode_parse(o["tk_mode"] | "pct");
+    int dec = o["tk_decimals"] | (int)SRC_DECIMALS_AUTO;
+    t.decimals = (dec < 0 || dec > SRC_DECIMALS_MAX) ? SRC_DECIMALS_AUTO : (uint8_t)dec;
+    t.sep = source_sep_parse(o["tk_sep"] | "space");
+    strlcpy(t.label, o["tk_label"] | "", sizeof(t.label));
+    strlcpy(t.short_label, o["tk_short"] | "", sizeof(t.short_label));   // absent in older files = auto
+}
+
+static void spec_save(JsonObject o, const SourceSpec& t) {
+    o["tk_preset"] = source_preset_str(t.preset);
+    o["tk_symbol"] = t.symbol;
+    o["tk_market"] = t.market;
+    o["tk_url"] = t.url;
+    o["tk_price"] = t.path_price;
+    o["tk_change"] = t.path_change;
+    o["tk_spark"] = t.path_spark;
+    o["tk_mode"] = source_change_mode_str(t.change_mode);
+    o["tk_decimals"] = t.decimals;
+    o["tk_sep"] = source_sep_str(t.sep);
+    o["tk_label"] = t.label;
+    o["tk_short"] = t.short_label;
 }
 
 void config_init() {
@@ -99,21 +132,17 @@ bool config_load(AppConfig& config) {
     // schema 8: the content source. Older files: pull_url set -> url, else none.
     if (doc.containsKey("source_kind")) config.source_kind = source_kind_parse(doc["source_kind"] | "none");
     else config.source_kind = source_pull_kind(SRC_KIND_NONE, config.pull_url[0] != '\0');
-    SourceSpec& t = config.ticker;
-    t.preset = source_preset_parse(doc["tk_preset"] | "coingecko");
-    strlcpy(t.symbol, doc["tk_symbol"] | "", sizeof(t.symbol));
-    strlcpy(t.market, doc["tk_market"] | "", sizeof(t.market));
-    strlcpy(t.url, doc["tk_url"] | "", sizeof(t.url));
-    strlcpy(t.path_price, doc["tk_price"] | "", sizeof(t.path_price));
-    strlcpy(t.path_change, doc["tk_change"] | "", sizeof(t.path_change));
-    strlcpy(t.path_spark, doc["tk_spark"] | "", sizeof(t.path_spark));
-    t.change_mode = source_change_mode_parse(doc["tk_mode"] | "pct");
-    int dec = doc["tk_decimals"] | (int)SRC_DECIMALS_AUTO;
-    t.decimals = (dec < 0 || dec > SRC_DECIMALS_MAX) ? SRC_DECIMALS_AUTO : (uint8_t)dec;
-    t.sep = source_sep_parse(doc["tk_sep"] | "space");
-    strlcpy(t.label, doc["tk_label"] | "", sizeof(t.label));
-    strlcpy(t.short_label, doc["tk_short"] | "", sizeof(t.short_label));   // absent in older files = auto
+    spec_load(doc.as<JsonObjectConst>(), config.ticker);
     strlcpy(config.tk_api_key, doc["tk_api_key"] | "", sizeof(config.tk_api_key));
+    // schema 9: the grid. Older files have neither key -> single, one source.
+    config.tk_view = source_view_parse(doc["tk_view"] | "single");
+    config.tk_n = source_rows_clamp(doc["tk_n"] | 1);
+    JsonArrayConst rows = doc["tickers"].as<JsonArrayConst>();
+    uint8_t i = 0;
+    for (JsonObjectConst o : rows) {
+        if (i >= SRC_ROWS_MAX - 1) break;
+        spec_load(o, config.tickers_more[i++]);
+    }
 
     // Sanitise values that may come from an older / hand-edited file.
     if (cn < 0 || cn > 65535 || cd < 0 || cd > 65535 || !cell_divider_valid((uint16_t)cn, (uint16_t)cd)) {
@@ -163,20 +192,13 @@ bool config_save(const AppConfig& config) {
     doc["adc_cell_den"] = config.adc_cell_den;
     doc["led_rule"] = led_rule_str(config.led_rule);
     doc["source_kind"] = source_kind_str(config.source_kind);
-    const SourceSpec& t = config.ticker;
-    doc["tk_preset"] = source_preset_str(t.preset);
-    doc["tk_symbol"] = t.symbol;
-    doc["tk_market"] = t.market;
-    doc["tk_url"] = t.url;
-    doc["tk_price"] = t.path_price;
-    doc["tk_change"] = t.path_change;
-    doc["tk_spark"] = t.path_spark;
-    doc["tk_mode"] = source_change_mode_str(t.change_mode);
-    doc["tk_decimals"] = t.decimals;
-    doc["tk_sep"] = source_sep_str(t.sep);
-    doc["tk_label"] = t.label;
-    doc["tk_short"] = t.short_label;
+    spec_save(doc.as<JsonObject>(), config.ticker);
     doc["tk_api_key"] = config.tk_api_key;
+    // schema 9: the grid rows 1..tk_n-1 (rows beyond tk_n are not kept)
+    doc["tk_view"] = source_view_str(config.tk_view);
+    doc["tk_n"] = config.tk_n;
+    JsonArray rows = doc.createNestedArray("tickers");
+    for (uint8_t i = 1; i < config.tk_n && i < SRC_ROWS_MAX; i++) spec_save(rows.createNestedObject(), config.tickers_more[i - 1]);
 
     String out;
     size_t written = serializeJson(doc, out);   // Writer<String>: shared with every other JSON response

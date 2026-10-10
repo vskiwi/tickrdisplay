@@ -43,6 +43,13 @@ void display_show_message(const char* title, const char* message);
 // sparkline, age line); NULL or t->ticker == false is the Text look above.
 // The fields are copied; one refresh (partial for the same layout kind).
 void display_show_content(const char* title, const char* message, const TickerFields* t);
+// The 2x2 grid (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid"):
+// g->n sources in 148 x 64 cells - badge, change (or "?" for a source that
+// failed this cycle), price - with the age line and the badges in the last
+// cell. Stored and drawn with one refresh; a third layout kind for the
+// refresh policy, the set and order of the names its "title". The stored
+// title becomes the comma-separated symbols (the shelf's Showing line).
+void display_show_grid(const GridFrame* g);
 // T_stale for the ticker's age line (docs/DEVICE_UI.md "E-ink refresh rules": 3 x refresh interval,
 // min 10 min - device_stale_ms()). Past it the line reads "stale N min".
 void display_set_stale_ms(uint32_t ms);
@@ -146,5 +153,6 @@ struct DisplayState {
     DisplayStatus status;
     const TickerFields* ticker;      // the ticker fields when the content is a ticker frame, else NULL ("layout")
     uint32_t      ticker_age_s;      // total age of the quote: payload age_s + time on the panel ("age_s")
+    const GridFrame* grid;           // the cells when the content is a grid frame (layout "grid"), else NULL
 };
 void display_get_state(DisplayState* out);

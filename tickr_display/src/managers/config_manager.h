@@ -15,8 +15,12 @@
 //    paths / decimals / separator / label, api_key reserved) - docs/TICKERS.md "Presets" / "Custom JSON".
 //    Migration: a file without source_kind gets `url` when pull_url is set, else `none`.
 //    Same schema: tk_short (the badge name, "" = derived) - absent in older files.
+// 9: tk_view (single | grid) + tk_n (1..4) + the sources of grid rows 1..3 as the
+//    array `tickers` (objects with the same tk_* keys; row 0 stays in the flat tk_*
+//    keys) - docs/TICKERS.md "Several tickers on one panel: the 2x2 grid".
+//    Migration: a file without tk_view / tk_n loads as `single`, one source.
 // Missing fields always fall back to their defaults, so older files load fine.
-#define CONFIG_SCHEMA_VERSION      8
+#define CONFIG_SCHEMA_VERSION      9
 #define CONFIG_REFRESH_MIN_MINUTES 1
 #define CONFIG_REFRESH_MAX_MINUTES 1440   // 24 h
 #define CONFIG_NAME_LEN            32
@@ -87,8 +91,27 @@ struct AppConfig {
     // echoed (`tk_api_key_set` in GET /api/config), not used by any fetch.
     char       tk_api_key[CONFIG_API_KEY_LEN] = "";
 
-    AppConfig() { source_spec_defaults(&ticker); }
+    // --- schema_version >= 9: the 2x2 grid ---------------------------------
+    // tk_view (SourceView): `single` draws `ticker` on the whole panel; `grid`
+    // draws rows 0..tk_n-1 in 148 x 64 cells (a grid of one is the single
+    // look). Rows 1..3 live in tickers_more[]; config_ticker_row() indexes
+    // all four. Stored as tk_view / tk_n / tickers[] in config.json.
+    uint8_t    tk_view = 0;
+    uint8_t    tk_n = 1;
+    SourceSpec tickers_more[SRC_ROWS_MAX - 1] = {};
+
+    AppConfig() {
+        source_spec_defaults(&ticker);
+        for (auto& t : tickers_more) source_spec_defaults(&t);
+    }
 };
+
+// Source row `i` (0..SRC_ROWS_MAX-1): row 0 is `ticker`, the rest tickers_more[].
+inline const SourceSpec& config_ticker_row(const AppConfig& c, uint8_t i) { return i ? c.tickers_more[i - 1] : c.ticker; }
+// cppcheck-suppress constParameterReference ; the mutable overload hands out a mutable row
+inline SourceSpec&       config_ticker_row(AppConfig& c, uint8_t i)       { return i ? c.tickers_more[i - 1] : c.ticker; }
+// Sources drawn: tk_n in the grid view, else 1.
+inline uint8_t config_ticker_rows(const AppConfig& c) { return c.tk_view == SRC_VIEW_GRID ? c.tk_n : 1; }
 
 // power_source <-> "auto"/"usb"/"battery" (unknown strings -> auto).
 const char* config_power_source_str(uint8_t v);

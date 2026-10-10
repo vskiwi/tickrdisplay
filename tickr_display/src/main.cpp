@@ -345,8 +345,10 @@ void setup() {
 
     if (battery) {
         LOGVLN("Running in Battery Mode");
-        int interval = cm.getConfig().refresh_interval_min;
-        if (interval <= 0) interval = 60; // default 1 hour
+        // The refresh interval (default 1 hour), raised to 15 min while the 2x2
+        // grid fetches up to four sources per wake (docs/TICKERS.md "Several
+        // tickers on one panel: the 2x2 grid").
+        int interval = (int)cm.batteryIntervalMin();
 
         if (!connected) {
             if (!cm.wifiCredentialsSaved()) {
@@ -495,7 +497,6 @@ static bool device_state_tick(const DisplayStatus& cur) {
     // flow has nothing to wake for otherwise - it would stay awake anyway),
     // never again after a switch that landed back in USB mode. Recovery
     // mode and the portal hold a due restart until they end.
-    const AppConfig& cfg = cm.getConfig();
     in.switch_allowed = power_get_mode() == POWER_MODE_AUTO && cm.pullConfigured() && !power_switch_locked;
     in.hold = recovery_active() || wifi_portal_active();
     DeviceOutputs out;
@@ -525,7 +526,7 @@ static bool device_state_tick(const DisplayStatus& cur) {
     // restart into the battery flow will follow (docs/DEVICE_UI.md "Power-mode switch").
     uint32_t hint = DS_AGE_UNKNOWN;
     if (out.card == CARD_POWER_BATTERY && out.power_switch == PSW_GRACE)
-        hint = cfg.refresh_interval_min > 0 ? (uint32_t)cfg.refresh_interval_min : 60u;   // the battery flow's default
+        hint = cm.batteryIntervalMin();   // the battery flow's interval (default 60, floor 15 with a grid)
     display_set_card(out.card, hint);
     if (svc == SERVICE_NONE || (out.card == CARD_OTA && svc != SERVICE_AP)) {
         // The frame carries today's facts: the link that held 30 s must not

@@ -3,6 +3,7 @@
 // direction from the change string.
 #include <unity.h>
 #include <string.h>
+#include <stdio.h>
 #include <math.h>
 #include "logic/ticker.h"
 
@@ -224,6 +225,90 @@ void test_price_trim_tight_buffer(void) {
     TEST_ASSERT_FALSE(ticker_price_trim_round("84 014.90", NULL, 8));
 }
 
+// --- the 2x2 grid (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid") ----
+
+void test_grid_cell_origins_and_ticker_cells(void) {
+    int16_t x, y;
+    grid_cell_origin(0, &x, &y); TEST_ASSERT_EQUAL_INT16(0, x);   TEST_ASSERT_EQUAL_INT16(0, y);    // Q1
+    grid_cell_origin(1, &x, &y); TEST_ASSERT_EQUAL_INT16(149, x); TEST_ASSERT_EQUAL_INT16(0, y);    // Q2, right of the separator
+    grid_cell_origin(2, &x, &y); TEST_ASSERT_EQUAL_INT16(0, x);   TEST_ASSERT_EQUAL_INT16(65, y);   // Q3, below it
+    grid_cell_origin(3, &x, &y); TEST_ASSERT_EQUAL_INT16(149, x); TEST_ASSERT_EQUAL_INT16(65, y);   // Q4
+    // n -> cells drawn as tickers: Q4 is the service cell unless all four are used
+    TEST_ASSERT_EQUAL_UINT8(1, grid_ticker_cells(1));
+    TEST_ASSERT_EQUAL_UINT8(2, grid_ticker_cells(2));
+    TEST_ASSERT_EQUAL_UINT8(3, grid_ticker_cells(3));
+    TEST_ASSERT_EQUAL_UINT8(4, grid_ticker_cells(4));
+    TEST_ASSERT_EQUAL_UINT8(4, grid_ticker_cells(9));   // clamped
+}
+
+static GridFrame frame_of(const char* a, const char* b, const char* c, const char* d) {
+    GridFrame g;
+    memset(&g, 0, sizeof(g));
+    const char* s[4] = { a, b, c, d };
+    for (int i = 0; i < 4; i++) if (s[i]) { snprintf(g.cells[i].short_label, sizeof(g.cells[i].short_label), "%s", s[i]); g.n = (uint8_t)(i + 1); }
+    return g;
+}
+
+void test_grid_set_key_set_and_order(void) {
+    GridFrame a = frame_of("BTC", "ETH", "XBT", "SOL");
+    GridFrame same = frame_of("BTC", "ETH", "XBT", "SOL");
+    GridFrame order = frame_of("ETH", "BTC", "XBT", "SOL");
+    GridFrame fewer = frame_of("BTC", "ETH", "XBT", NULL);
+    GridFrame other = frame_of("BTC", "ETH", "XBT", "DOGE");
+    GridFrame split = frame_of("BT", "CETH", NULL, NULL);
+    GridFrame split2 = frame_of("BTC", "ETH", NULL, NULL);
+    TEST_ASSERT_EQUAL_UINT32(grid_set_key(&a), grid_set_key(&same));       // the same set in the same order = no layout change
+    TEST_ASSERT_NOT_EQUAL(grid_set_key(&a), grid_set_key(&order));          // reordered = full
+    TEST_ASSERT_NOT_EQUAL(grid_set_key(&a), grid_set_key(&fewer));          // one removed = full
+    TEST_ASSERT_NOT_EQUAL(grid_set_key(&a), grid_set_key(&other));          // one replaced = full
+    TEST_ASSERT_NOT_EQUAL(grid_set_key(&split), grid_set_key(&split2));     // names are delimited, not concatenated
+    // the price in a cell is not part of the key (a price change is a partial)
+    snprintf(same.cells[0].price, sizeof(same.cells[0].price), "%s", "84 015");
+    same.cells[1].ok = false;
+    TEST_ASSERT_EQUAL_UINT32(grid_set_key(&a), grid_set_key(&same));
+}
+
+void test_grid_battery_floor(void) {
+    TEST_ASSERT_EQUAL_UINT32(15, grid_battery_interval_min(true, 1));     // a grid on battery: at least 15 min
+    TEST_ASSERT_EQUAL_UINT32(15, grid_battery_interval_min(true, 14));
+    TEST_ASSERT_EQUAL_UINT32(15, grid_battery_interval_min(true, 15));
+    TEST_ASSERT_EQUAL_UINT32(60, grid_battery_interval_min(true, 60));    // above the floor: as configured
+    TEST_ASSERT_EQUAL_UINT32(1, grid_battery_interval_min(false, 1));     // the single view keeps its 1-min floor
+    TEST_ASSERT_EQUAL_UINT32(5, grid_battery_interval_min(false, 5));
+}
+
+// A fake measurer: 18 pt = 15 px per character, 12 pt = 10 px, 9 pt = 7 px
+// (the real ratios of the FreeSansBold digits, rounded).
+static int16_t fake_measure(const char* text, uint8_t font_step, void* ctx) {
+    int* calls = (int*)ctx;
+    if (calls) (*calls)++;
+    static const int16_t kPx[3] = { 15, 10, 7 };
+    return (int16_t)(strlen(text) * kPx[font_step < 3 ? font_step : 2]);
+}
+
+void test_grid_fit_price_steps(void) {
+    char buf[24];
+    const char* out = NULL;
+    int calls = 0;
+    // "2 695.42" = 8 chars x 15 = 120 px fits 140 at 18 pt: step 0, the text itself, one measurement
+    TEST_ASSERT_EQUAL_UINT8(0, grid_fit_price("2 695.42", 140, fake_measure, &calls, buf, sizeof(buf), &out));
+    TEST_ASSERT_EQUAL_STRING("2 695.42", out);
+    TEST_ASSERT_EQUAL_INT(1, calls);
+    // "84 014.90" = 9 x 15 = 135 misses 130 -> without the fraction "84 015" = 90 px at 18 pt: step 1, the trimmed text
+    TEST_ASSERT_EQUAL_UINT8(1, grid_fit_price("84 014.90", 130, fake_measure, NULL, buf, sizeof(buf), &out));
+    TEST_ASSERT_EQUAL_STRING("84 015", out);
+    TEST_ASSERT_TRUE(out == buf);
+    // "198.1234" (under 1 000: the fraction stays) = 8 x 15 = 120 misses 100 -> 12 pt: 80 px fits: step 2, whole
+    TEST_ASSERT_EQUAL_UINT8(2, grid_fit_price("198.1234", 100, fake_measure, NULL, buf, sizeof(buf), &out));
+    TEST_ASSERT_EQUAL_STRING("198.1234", out);
+    // "1 234 567.89" = 12 chars: 180 / trimmed "1 234 568" 135 / 120 at 12 pt all miss 100 -> step 3 (9 pt, 84 px), whole string
+    TEST_ASSERT_EQUAL_UINT8(3, grid_fit_price("1 234 567.89", 100, fake_measure, NULL, buf, sizeof(buf), &out));
+    TEST_ASSERT_EQUAL_STRING("1 234 567.89", out);
+    // a proxy's free text has no trim: 18 pt whole -> 12 pt
+    TEST_ASSERT_EQUAL_UINT8(2, grid_fit_price("$95,240.50", 120, fake_measure, NULL, buf, sizeof(buf), &out));
+    TEST_ASSERT_EQUAL_STRING("$95,240.50", out);
+}
+
 // --- LED rule ------------------------------------------------------------------
 
 void test_led_rule_off_uses_payload_led_only(void) {
@@ -277,6 +362,10 @@ int main(int, char**) {
     RUN_TEST(test_price_trim_separators);
     RUN_TEST(test_price_trim_refuses_what_it_should);
     RUN_TEST(test_price_trim_tight_buffer);
+    RUN_TEST(test_grid_cell_origins_and_ticker_cells);
+    RUN_TEST(test_grid_set_key_set_and_order);
+    RUN_TEST(test_grid_battery_floor);
+    RUN_TEST(test_grid_fit_price_steps);
     RUN_TEST(test_led_rule_off_uses_payload_led_only);
     RUN_TEST(test_led_rule_sign_table);
     RUN_TEST(test_led_rule_strings);

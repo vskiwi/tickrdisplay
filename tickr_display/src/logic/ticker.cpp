@@ -139,6 +139,44 @@ tight:
     return false;
 }
 
+// --- 2x2 grid ----------------------------------------------------------------
+
+void grid_cell_origin(uint8_t idx, int16_t* x, int16_t* y) {
+    *x = (idx & 1) ? GRID_CELL_W + 1 : 0;
+    *y = (idx & 2) ? GRID_CELL_H + 1 : 0;
+}
+
+uint8_t grid_ticker_cells(uint8_t n) {
+    if (n > GRID_MAX) n = GRID_MAX;
+    return n == GRID_MAX ? GRID_MAX : (n < GRID_MAX - 1 ? n : GRID_MAX - 1);
+}
+
+static uint32_t fnv1a(uint32_t h, const char* s) {
+    for (; *s; s++) { h ^= (uint8_t)*s; h *= 16777619u; }
+    h ^= 0xFF;                       // terminator: "AB","C" differs from "A","BC"
+    h *= 16777619u;
+    return h;
+}
+
+uint32_t grid_set_key(const GridFrame* g) {
+    uint32_t h = 2166136261u ^ g->n;
+    for (uint8_t i = 0; i < g->n && i < GRID_MAX; i++) h = fnv1a(h, g->cells[i].short_label);
+    return h;
+}
+
+uint32_t grid_battery_interval_min(bool grid, uint32_t interval_min) {
+    return grid && interval_min < GRID_BATT_MIN_MIN ? GRID_BATT_MIN_MIN : interval_min;
+}
+
+uint8_t grid_fit_price(const char* price, int16_t max_w, GridMeasureFn measure, void* ctx,
+                       char* buf, size_t cap, const char** out) {
+    *out = price;
+    if (measure(price, 0, ctx) <= max_w) return 0;
+    if (ticker_price_trim_round(price, buf, cap) && measure(buf, 0, ctx) <= max_w) { *out = buf; return 1; }
+    if (measure(price, 1, ctx) <= max_w) return 2;
+    return 3;
+}
+
 const char* led_rule_str(uint8_t v) {
     return v == LED_RULE_SIGN ? "sign" : "off";
 }
