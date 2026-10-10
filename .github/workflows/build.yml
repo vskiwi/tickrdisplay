@@ -41,7 +41,7 @@ jobs:
             pio-firmware-${{ runner.os }}-
 
       - name: Install PlatformIO
-        run: pip install "platformio==${PLATFORMIO_VERSION}"
+        run: pip install "platformio==${PLATFORMIO_VERSION}" zopfli
 
       - name: Build firmware
         # tickr_dev (ArduinoOTA + mDNS) is built only to keep that code compiling;
@@ -105,7 +105,7 @@ jobs:
             pio-firmware-${{ runner.os }}-
 
       - name: Install PlatformIO
-        run: pip install "platformio==${PLATFORMIO_VERSION}"
+        run: pip install "platformio==${PLATFORMIO_VERSION}" zopfli
 
       - name: cppcheck (project sources only, fail on HIGH defects)
         run: pio check -e tickr --skip-packages --fail-on-defect=high

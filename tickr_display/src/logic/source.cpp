@@ -1,5 +1,6 @@
 #include "source.h"
 #include "payload.h"   // PAYLOAD_MAX_LEN, PAYLOAD_JSON_DOC: the same bounded document as a payload
+#include "fmt_float.h"
 #include <ArduinoJson.h>
 #include <string.h>
 #include <strings.h>
@@ -337,7 +338,9 @@ static bool variant_text(JsonVariantConst v, char* out, size_t n) {
         return true;
     }
     if (v.is<long>())  { snprintf(out, n, "%ld", v.as<long>()); return true; }
-    if (v.is<float>()) { snprintf(out, n, "%.8f", (double)v.as<float>()); return true; }
+    // No "%.8f": the image links the ROM nano printf (fmt_float.h); exact digits,
+    // so 0.00001234 keeps its 8 fraction digits for the formatter below.
+    if (v.is<float>()) return fmt_float_fixed(v.as<float>(), 8, out, n);
     return false;
 }
 

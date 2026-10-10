@@ -1,5 +1,6 @@
 #include "payload.h"
 #include "rtttl.h"
+#include "fmt_float.h"
 #include <ArduinoJson.h>
 #include <string.h>
 #include <stdio.h>
@@ -42,7 +43,11 @@ static bool copy_text_field(JsonVariantConst v, const char* name, char* dst, siz
         return true;
     }
     if (v.is<float>()) {
-        snprintf(dst, dst_len, "%g", (double)v.as<float>());
+        // No "%g": the image links the ROM nano printf (fmt_float.h).
+        if (!fmt_float_g(v.as<float>(), dst, dst_len)) {
+            set_err2(err, err_len, name, "too long");
+            return false;
+        }
         return true;
     }
     set_err2(err, err_len, name, "must be a string");

@@ -8,6 +8,8 @@ procedure in [`RELEASING.md`](RELEASING.md); known limitations in the [README](.
 ## Prerequisites
 
 * Python 3.9+ and PlatformIO Core (`pip install platformio`) or the PlatformIO IDE extension.
+  Optional: `pip install zopfli` – `build_www.py` then packs the web pages a few percent smaller
+  (CI installs it; without it the build falls back to zlib and prints which one it used).
 * For the host unit tests: a C++ compiler (clang on macOS, gcc on Linux, MSYS2/MinGW on Windows).
 * For UART flashing: a 3.3 V USB-UART adapter wired to the programming header
   ([`HARDWARE.md` → *Programming access*](HARDWARE.md#programming-access)).
@@ -44,6 +46,21 @@ and the `dist/` suffix differ.
 Always on (`[esp32] build_flags`): `-DCORE_DEBUG_LEVEL=0` (Arduino core log level; raise to 3–5
 while debugging), `-DARDUINOJSON_USE_DOUBLE=0`, `-DARDUINOJSON_USE_LONG_LONG=0`. The native env
 defines `-DNATIVE_BUILD` for `#ifndef NATIVE_BUILD` guards around Arduino-only code.
+
+Two flags trade runtime features for flash:
+
+* `-Wl,-T,esp32.rom.newlib-nano.ld` links the `printf` family from the ESP32 ROM (newlib's
+  "nano" build) instead of the full copy in flash. **Floating-point conversions (`%f`, `%g`,
+  `%e`) and 64-bit integers (`%lld`, `%llu`) are not available** anywhere in the image – format
+  floats with `fmt_float_g()` / `fmt_float_fixed()` from `src/logic/fmt_float.h` (exact,
+  integer-only, host-tested against the C library). `scripts/check_float_printf.py` fails the
+  build on such a format in a string literal under `src/`; as a last line of defence
+  `src/hal/rom_hooks.cpp` installs the ROM's float hook so a stray `%f` prints `?` instead of
+  jumping to address 0. PlatformIO prints a deprecation note for the `-Wl,-T` form; the
+  suggested `board_build.ldscript` option is not used by the Arduino-ESP32 builder.
+* `-Wl,--wrap=esp_core_dump_init` / `--wrap=esp_core_dump_to_flash` with no-op replacements in
+  `src/hal/rom_hooks.cpp`: no core dump is written to the `coredump` partition on a panic. The
+  panic handler still prints the backtrace on the serial port and reboots.
 
 Opt-in flags (off in `tickr`):
 
@@ -96,8 +113,9 @@ www/src/_*.{html,js,css}           partials: head/nav, token handling (_auth.js,
 
 * `{{include:<file>}}` splices a partial (files starting with `_` are never emitted as assets).
   Leading indentation, blank lines and whole-line `//` / `/* … */` comments are stripped (never
-  start a line *inside a string literal* with `//` or `/*`); the result is gzip'ed (level 9,
-  deterministic) and written to `src/web/generated/www_assets.h` (git-ignored build product) as
+  start a line *inside a string literal* with `//` or `/*`); the result is gzip'ed (zopfli when
+  the module is installed, otherwise zlib level 9; both deterministic – no mtime, no file name)
+  and written to `src/web/generated/www_assets.h` (git-ignored build product) as
   `PROGMEM` arrays plus a table `WWW_ASSETS[] = {name, mime, data, len, etag}`.
 * `src/web/www.cpp` serves the table: `www_send(request, "panel.html")` sends the bytes from flash
   with `Content-Encoding: gzip`, an `ETag` (CRC32 of the body) and `Cache-Control: no-cache`;
@@ -270,12 +288,15 @@ tickr_display/
   scripts/version.py          FIRMWARE_VERSION define + dist/ copy (pre-script)
   scripts/build_www.py        www/src/ -> gzip PROGMEM header, 40 KB web gate (pre-script and CLI)
   scripts/build_ca_bundle.py  certs/*.pem -> IDF root bundle header (pre-script and CLI)
+  scripts/check_float_printf.py  rejects %f / %g / %e / %lld formats under src/ (pre-script and CLI)
   scripts/src_warnings.py     -Wall -Wextra for src/ only, -isystem for libs
   scripts/check_size.py       OTA image size gate (post-script and CLI)
   certs/                      root CAs of the ticker presets (PEM with provenance headers)
   www/src/                    web UI sources (HTML/CSS/JS, partials start with _)
   src/                        firmware sources (hal/, managers/, logic/, web/)
   src/log.h                   LOGV / LOGVLN – informational serial lines behind TICKR_LOG_VERBOSE
+  src/hal/rom_hooks.cpp       ROM printf float hook stub, core-dump no-ops (see Build flags)
+  src/logic/fmt_float.h       float -> text without the C library's %f / %g
   src/web/generated/          build product of build_www.py (git-ignored)
   src/generated/              build product of build_ca_bundle.py (git-ignored)
   test/                       host unit tests (test_<module>/test_main.cpp)

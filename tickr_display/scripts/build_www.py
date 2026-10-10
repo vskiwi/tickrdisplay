@@ -85,8 +85,23 @@ def _c_ident(name):
     return "WWW_" + re.sub(r"[^A-Za-z0-9]", "_", name).upper() + "_GZ"
 
 
+try:
+    import zopfli.gzip as _zopfli   # optional: `pip install zopfli`, 2-3 % smaller gzip streams
+except ImportError:                 # pragma: no cover - depends on the host
+    _zopfli = None
+
+# Which compressor produced the header (printed once; the two differ in size,
+# so a reproducible build needs the same choice on every machine - CI installs
+# zopfli, see docs/DEVELOPMENT.md "Web UI").
+COMPRESSOR = "zopfli" if _zopfli else "zlib"
+
+
 def _gzip(data):
-    # mtime=0 and no original name -> byte-identical output for identical input.
+    # Both paths are deterministic for identical input: no mtime, no file name.
+    # Zopfli emits the same gzip container (plain deflate inside), so the
+    # device and the browsers see no difference.
+    if _zopfli:
+        return _zopfli.compress(data, numiterations=50)
     return gzip.compress(data, compresslevel=9, mtime=0)
 
 
@@ -119,8 +134,8 @@ def build(project_dir, write=True, verbose=True):
             print("[build_www] %-14s %6d B raw -> %5d B gz  etag %s%s"
                   % (name, len(raw), len(gz), etag, "  (tickr_dev only)" if dev else ""))
     if verbose:
-        print("[build_www] release total %d B raw -> %d B gz (gate %d B, %.0f%% used); tickr_dev total %d B gz"
-              % (total_raw, total_gz, WWW_GZ_LIMIT, total_gz * 100.0 / WWW_GZ_LIMIT, total_gz + dev_gz))
+        print("[build_www] release total %d B raw -> %d B gz (gate %d B, %.0f%% used, %s); tickr_dev total %d B gz"
+              % (total_raw, total_gz, WWW_GZ_LIMIT, total_gz * 100.0 / WWW_GZ_LIMIT, COMPRESSOR, total_gz + dev_gz))
     if total_gz > WWW_GZ_LIMIT:
         raise RuntimeError("build_www: gzipped web assets are %d B, over the %d B gate (see docs/DEVELOPMENT.md)"
                            % (total_gz, WWW_GZ_LIMIT))

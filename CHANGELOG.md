@@ -8,6 +8,15 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Changed
+
+- **Build**: smaller firmware image – the `printf` family comes from the ESP32
+  ROM (no floating-point or 64-bit integer formats in the image; floats are
+  formatted by `src/logic/fmt_float`, a build step rejects `%f`-style formats
+  under `src/`), core dumps to flash are disabled (a panic still prints its
+  backtrace and reboots), and the web pages are packed with zopfli when the
+  module is installed.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added

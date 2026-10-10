@@ -20,7 +20,7 @@ variables:
 
 .platformio:
   before_script:
-    - pip install "platformio==${PLATFORMIO_VERSION}"
+    - pip install "platformio==${PLATFORMIO_VERSION}" zopfli
     - cd tickr_display
   cache:
     key:

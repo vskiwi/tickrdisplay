@@ -7,6 +7,7 @@
 #include "hal/hal_power.h"
 #include "hal/hal_power_probe.h"
 #include "hal/hal_indication.h"
+#include "hal/rom_hooks.h"
 #include "managers/connectivity_manager.h"
 #include "managers/ota_manager.h"
 #include "managers/arduino_ota.h"
@@ -192,6 +193,7 @@ static void battery_fail(uint32_t interval_min) {
 }
 
 void setup() {
+    rom_hooks_init();   // before the first printf: the ROM printf's %f hook (rom_hooks.h)
     Serial.begin(115200);
     // small delay for serial to stabilize
     delay(500);
