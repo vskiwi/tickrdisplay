@@ -42,6 +42,7 @@ the developer build `tickr_dev`.
 | Arduino core for ESP32 (`framework-arduinoespressif32`) | 2.0.17 (via PlatformIO `espressif32 @ 7.1.3`) | LGPL-2.1 | https://github.com/espressif/arduino-esp32 | Includes `WiFi`, `DNSServer`, `HTTPClient`, `WiFiClientSecure`, `Update`, `LittleFS`, `SPI`, `ledc`, `dac` APIs used by this project (`ArduinoOTA`/`ESPmDNS` only in `tickr_dev`). |
 | ESP-IDF (bundled in the Arduino core) | 4.4.x | Apache-2.0 | https://github.com/espressif/esp-idf | Includes FreeRTOS (MIT), lwIP (BSD), mbedTLS (Apache-2.0), NimBLE/Bluedroid (not used), esp_littlefs / littlefs (BSD-3). |
 | PlatformIO Core (build tool) | any | Apache-2.0 | https://platformio.org | Build tool only, not linked. |
+| zopfli (Python package, optional build tool) | any | Apache-2.0 | https://github.com/fonttools/py-zopfli (bindings for https://github.com/google/zopfli) | Used by `scripts/build_www.py` to compress the web pages when installed; the output is plain gzip. Not linked, not required for a build. |
 | xtensa-esp32-elf-gcc toolchain | as pinned by platform | GPL-3.0 (compiler), GCC runtime exception for libgcc/libstdc++ | https://github.com/espressif/crosstool-NG | Runtime library exception applies to the linked runtime. |
 
 ## Content

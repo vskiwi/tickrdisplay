@@ -8,44 +8,52 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-10
+
 ### Added
 
-- **Tickers**: a **2×2 grid** of up to four ticker sources on one panel –
-  each cell with the short-name badge, the change with its triangle and the
-  price (whole at 18 pt, else without its fraction, else smaller), the age
-  line and the badges in the last cell; two or three tickers use the same
-  cells. Any mix of presets. All sources are fetched in one cycle and drawn
-  in one frame; a source that fails keeps its last price with `?` in place
-  of the change, also across deep sleep; a changed set or order of tickers
-  is a full refresh. On battery the interval has a 15-minute floor with a
-  grid. Editor: *View* (one ticker / grid) with up to four rows – preset,
-  symbol, market, short name, reorder / remove, *Test* per row – and the
-  *Advanced* settings per row. API: `tk_view`, `tk_n`, `tk1_*` … `tk3_*`
-  in `/api/config` and `POST /config`; `/api/screen/state` reports
-  `layout: "grid"` with `symbols[]` and `shorts[]`.
-- **Tickers**: the ticker's short name on a black badge top left of the panel
-  (`BTC`, `XBT`, `ETH` – up to 7 characters, 18 pt white on black, smaller
-  when longer), with the change beside it and the price below. Derived from
-  the symbol when the new *Short name* field under *Advanced* is empty
-  (`tk_short`): exchange symbols upper-cased, a pair typed as one word loses
-  its quote currency, the common CoinGecko ids map to their tickers; *Test*
-  returns the derived name. A proxy sets it with the payload field `short`;
-  a payload without one draws the frame as before. `/api/screen/state` adds
-  `short`.
+- **Display**: the ticker's short name on a black badge top left of the
+  panel (`BTC`, `XBT`, `ETH` – up to 7 characters, 18 pt white on black,
+  smaller when longer), with the change beside it and the price below. The
+  name is derived from the symbol when the new *Short name* setting is
+  empty: exchange symbols upper-cased, a pair typed as one word loses its
+  quote currency, the common CoinGecko ids map to their tickers. A payload
+  without a short name draws the frame as before. A changed badge is a full
+  refresh.
+- **Display**: a **2×2 grid** of up to four ticker sources on one panel –
+  each cell with its badge, the change with its triangle and the price
+  (whole at 18 pt, else without its fraction, else smaller); the age line
+  and the status badges live in the last cell; two or three tickers use the
+  same cells. Any mix of presets. All sources are fetched in one cycle and
+  drawn in one frame; a source that fails keeps its last price with `?` in
+  place of the change, also across deep sleep; a changed set or order of
+  tickers is a full refresh. On battery the interval has a 15-minute floor
+  while a grid is configured.
+- **Web UI**: the Ticker editor gets a *View* choice (one ticker / 2×2
+  grid) with up to four rows – preset, symbol, market, short name, reorder /
+  remove, *Test* per row – and the *Advanced* settings per row, among them
+  the new *Short name on the panel* field; *Test* shows the derived short
+  name as the field's placeholder.
+- **API**: `tk_short`, `tk_view`, `tk_n` and the per-row fields `tk1_*` …
+  `tk3_*` in `GET /api/config` and `POST /config`; `POST /api/source/test`
+  returns `short`; the payload field `short` for proxies;
+  `GET /api/screen/state` adds `short` and, for a grid, `layout: "grid"`
+  with `symbols[]` and `shorts[]`. Configurations saved by earlier releases
+  load unchanged as a single ticker.
 
 ### Changed
 
+- **Display**: a price with an integer part of 1 000 or more drops its
+  fraction (`84 014.90` → `84 015`, rounded half-up) when that keeps the
+  largest price size on the panel instead of stepping down to the next one;
+  a price that fits whole keeps its decimals, and the *Decimals* /
+  *Separator* settings are unchanged.
 - **Build**: smaller firmware image – the `printf` family comes from the ESP32
   ROM (no floating-point or 64-bit integer formats in the image; floats are
   formatted by `src/logic/fmt_float`, a build step rejects `%f`-style formats
   under `src/`), core dumps to flash are disabled (a panic still prints its
   backtrace and reboots), and the web pages are packed with zopfli when the
   module is installed.
-- **Ticker look**: a price with an integer part of 1 000 or more drops its
-  fraction (`84 014.90` → `84 015`, rounded half-up) when that keeps the
-  largest price size on the panel instead of stepping down to the next one;
-  a price that fits whole keeps its decimals, and the *Decimals* /
-  *Separator* settings are unchanged.
 
 ### Fixed
 
@@ -156,6 +164,7 @@ the day of the release; the development history before it was private.
   gate for the web UI; `TICKR_LOG_VERBOSE` build flag for the informational
   serial log.
 
-[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vskiwi/tickrdisplay/releases/tag/v0.1.0
