@@ -22,6 +22,12 @@ Until `1.0.0` minor versions may contain breaking changes.
   a price that fits whole keeps its decimals, and the *Decimals* /
   *Separator* settings are unchanged.
 
+### Fixed
+
+- **Web UI**: the *Firmware* line of a device's status card showed the
+  version with a doubled prefix (`vv0.2.0`); the version string is now shown
+  as the firmware reports it.
+
 ## [0.2.0] - 2026-09-29
 
 ### Added
