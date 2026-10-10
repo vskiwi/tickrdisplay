@@ -29,7 +29,7 @@ Legacy URLs redirect: `/panel` → `/`, `/group` → `/#group`, `/config` →
 `/system`, `GET /update` → `/system#firmware`.
 
 <p align="center">
-  <img src="images/shelf.png" width="400" alt="The shelf at phone width: two device cards stacked in one column with live e-ink previews of a BTC/USDT and an ETH/USDT ticker, LED bars, the device names and the Identify, For all and drawer buttons above">
+  <img src="images/shelf.png" width="400" alt="The shelf at phone width: two device cards stacked in one column with live e-ink previews of a BTC/USDT and an ETH/USDT ticker with their name badges, LED bars, the device names and the Identify, For all and drawer buttons above">
 </p>
 
 Everything about one device goes through its card: a click (tap, or Enter /
@@ -74,7 +74,8 @@ it. Everything about the fleet is on the toolbar and in the drawer.
 4. The card's next frame poll shows the result.
 
 <p align="center">
-  <img src="images/content-editor-ticker.png" width="400" alt="The Content editor for one device as a bottom sheet over the dimmed shelf: source Ticker, market Binance, symbol BTC and market USDT, the refresh interval, the Advanced disclosure and the Test, Save and Back buttons">
+  <img src="images/content-editor-grid.png" width="400" alt="The Content editor in the 2x2 grid view: four ticker rows with preset, symbol, market and short name, up, down, remove and Test buttons per row, the interval field with the grid hint, the Advanced section for the selected row and the Save and Back buttons">
+  <img src="images/content-editor-ticker.png" width="400" alt="The Content editor for one device as a bottom sheet over the dimmed shelf: source Ticker, view One ticker, market Binance, symbol BTC and market USDT, the refresh interval, the Advanced section open with the label, the short name for the panel badge, decimals, separator and LED rule, and the Test, Save and Back buttons">
 </p>
 
 A sleeping or offline card says *plug it in (USB) to change what it shows*

@@ -116,6 +116,11 @@ the same row, the price centred below it and as large as it fits, the
 sparkline bottom-left, the age line bottom-right, badges in the corner
 ([`DEVICE_UI.md`](DEVICE_UI.md) → *Card texts and layout notes*).
 
+<p align="center">
+  <img src="images/hero-ticker.png" width="440" alt="E-ink frame of a BTC/USDT ticker: the BTC badge white on black top left, the change with an up-triangle top right, the price 83 126 without its fraction at the largest size, a sparkline and the age line 'just now'">
+  <img src="images/screen-ticker-eth.png" width="440" alt="E-ink frame of an ETH/USDT ticker: the ETH badge, the change, the price with its cents at the largest size because it fits, a sparkline and the age line">
+</p>
+
 * **Short name**: up to 7 characters white on black, 18 pt (12 or 9 pt
   when the badge would grow past half the row). Empty = derived from the
   symbol: the exchange presets and *Custom JSON* upper-case it (`btc` →
@@ -165,6 +170,11 @@ sparkline bottom-left, the age line bottom-right, badges in the corner
 in a cell of 148 × 64 px separated by 1 px lines: top left, top right,
 bottom left, bottom right in the order of the editor's rows. One source in
 the grid view is the single look of §4.
+
+<p align="center">
+  <img src="images/screen-grid.png" width="440" alt="E-ink frame as a 2x2 grid: BTC and ETH from Binance, XBT from Kraken and SOL from CoinGecko, each cell with a name badge, the change with its triangle and the price; the age line and the USB bolt share the bottom-right cell">
+  <img src="images/content-editor-grid.png" width="300" alt="The Content editor in the grid view: four ticker rows with preset, symbol, market and short name, up, down, remove and Test buttons per row, the interval field and the Advanced section for the selected row">
+</p>
 
 * **A cell**: the short name on a black badge (12 pt, 9 pt when it would
   grow past half the cell) with the change and its triangle right of it,

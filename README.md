@@ -8,11 +8,12 @@
 ![Platform: ESP32 / PlatformIO](https://img.shields.io/badge/platform-ESP32%20%C2%B7%20PlatformIO-lightgrey)
 
 <p align="center">
-  <img src="docs/images/hero-ticker.png" width="640" alt="The 296x128 e-ink frame of a TickrDisplay ticker: BTC/USDT from Binance, the price large in the middle, a down-triangle with the 24-hour change top right, a sparkline bottom left, the age line 'just now' and the USB bolt bottom right">
+  <img src="docs/images/hero-ticker.png" width="440" alt="The 296x128 e-ink frame of a TickrDisplay ticker: the short name BTC white on a black badge top left, an up-triangle with the 24-hour change top right, the price 83 126 large in the middle, a sparkline bottom left, the age line 'just now' and the USB bolt bottom right">
+  <img src="docs/images/screen-grid.png" width="440" alt="The same e-ink panel as a 2x2 grid of four tickers: BTC and ETH from Binance, XBT from Kraken and SOL from CoinGecko, each cell with its name badge, change with triangle and price, the age line and the USB bolt in the last cell">
 </p>
 <p align="center">
-  <img src="docs/images/shelf.png" width="360" alt="The shelf web page at phone width: two device cards stacked in one column with live e-ink previews of a BTC/USDT and an ETH/USDT Binance ticker, LED bars, the device names Shelf-Left (this device) and Shelf-Right, and the Identify, For all and drawer buttons above">
-  <img src="docs/images/content-editor-ticker.png" width="360" alt="The Content editor for Shelf-Left as a bottom sheet over the dimmed shelf: source Ticker, market Binance, symbol BTC and market USDT, the refresh interval in minutes, the Advanced disclosure and the Test, Save and Back buttons">
+  <img src="docs/images/shelf.png" width="360" alt="The shelf web page at phone width: two device cards stacked in one column with live e-ink previews of a BTC/USDT and an ETH/USDT Binance ticker with their name badges, LED bars, the device names Shelf-Left (this device) and Shelf-Right, and the Identify, For all and drawer buttons above">
+  <img src="docs/images/content-editor-ticker.png" width="360" alt="The Content editor for Shelf-Left as a bottom sheet over the dimmed shelf: source Ticker, view One ticker, market Binance, symbol BTC and market USDT, the refresh interval in minutes, the Advanced section open with the label, the short name for the panel badge, decimals, separator and LED rule, and the Test, Save and Back buttons">
 </p>
 
 > **Status: alpha.** Developed and used on two units (board revisions A and B). Expect rough edges and breaking changes before `v1.0`. Flashing third-party firmware **voids the vendor warranty** – read the [Disclaimer](#disclaimer) first.
@@ -79,7 +80,7 @@ Full procedure, UART flashing, partition layout, risks and **going back to stock
 Settings live in `/config.json` on the device and are edited on **`http://<device-ip>/system`** (Network, Content source, Security, Power, Firmware, Advanced, About – one form, one *Save*); what a device shows is chosen from its card on the shelf (*Change…*). Every form is validated as a whole – an invalid field rejects the save with `400`.
 
 <p align="center">
-  <img src="docs/images/system-page.png" width="360" alt="The System page at phone width: the Network section with the connected Wi-Fi network, address and signal, the Content source section with Pull URL, refresh interval, MQTT server, port and topic fields, the Security section with the API token field, and the sticky Save button at the bottom">
+  <img src="docs/images/system-page.png" width="360" alt="The System page at phone width: the Network section with the connected Wi-Fi network, address and signal, the Content source section with Pull URL, refresh interval, MQTT server, port and topic fields, the Security section with the API token field, the collapsed Power, Firmware, Advanced and About sections and the Save button at the bottom">
   <img src="docs/images/device-sheet.png" width="360" alt="The device sheet for Shelf-Left as a bottom sheet over the dimmed shelf: header with the online and this-device badges, Status rows for address, power and cell voltage, signal, firmware, uptime, MQTT and relay, the Showing row with the current ticker and a Change button, the Identify this, Rename and Move actions and the Test LED and sound disclosure">
 </p>
 

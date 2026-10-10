@@ -9,7 +9,8 @@ description: Open-source replacement firmware for the TickrMeter ESP32 e-ink tic
 Crypto quotes fetched by the device itself, any text pushed over HTTP or MQTT, several devices arranged on one virtual shelf – no vendor account, no subscription, nothing leaves your LAN.
 
 <p align="center">
-  <img src="images/hero-ticker.png" width="640" alt="TickrDisplay e-ink frame: BTC/USDT from Binance with price, 24-hour change and sparkline">
+  <img src="images/hero-ticker.png" width="440" alt="TickrDisplay e-ink frame: the BTC badge, the price, the 24-hour change and a sparkline">
+  <img src="images/screen-grid.png" width="440" alt="TickrDisplay e-ink frame as a 2x2 grid: BTC, ETH, XBT and SOL with name badges, changes and prices">
 </p>
 
 - **Source code and documentation:** [github.com/vskiwi/tickrdisplay](https://github.com/vskiwi/tickrdisplay)
@@ -20,7 +21,7 @@ Crypto quotes fetched by the device itself, any text pushed over HTTP or MQTT, s
 
 ## What it does
 
-- **Cloud-free crypto tickers** – CoinGecko, Kraken and Binance presets, or any JSON API via *Custom JSON*; HTTPS verified against roots baked into the firmware.
+- **Cloud-free crypto tickers** – CoinGecko, Kraken and Binance presets, or any JSON API via *Custom JSON*; one ticker on the whole panel or up to four in a 2×2 grid; HTTPS verified against roots baked into the firmware.
 - **Push your own content** – `POST /api/screen`, MQTT or a Pull URL: title, value, LED colour, beep or RTTTL melody. Works from Home Assistant, Node-RED, curl or scripts.
 - **Two power modes** – always-on over USB with instant updates; deep sleep with periodic wake-ups on battery.
 - **The shelf** – every device on your LAN as a live card with an e-ink preview, drag-and-drop arrangement, groups without a server, firmware updates for the whole group.

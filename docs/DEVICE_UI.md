@@ -41,6 +41,11 @@ device behaves as USB; `/api/screen/state.status` says `power: "unknown"`
 and `/system` offers the override. A configured override draws the glyph
 of the *configured* source.
 
+<p align="center">
+  <img src="images/hero-ticker.png" width="440" alt="The content screen with one ticker: the BTC badge white on black top left, the change with its triangle top right, the price at the largest size, the sparkline bottom left, the age line and the USB bolt badge bottom right">
+  <img src="images/screen-grid.png" width="440" alt="The content screen as a 2x2 grid: four cells with name badge, change and price, 1 px separators, the age line and the USB bolt badge in the bottom-right cell">
+</p>
+
 ## State machine
 
 ```
