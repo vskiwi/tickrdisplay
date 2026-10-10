@@ -462,7 +462,21 @@ static void draw_content() {
         if (!top) top = 20;
     }
     if (_last_message[0]) {
-        if (_tk.ticker) print_centered_fitted(_last_message, top, bottom, kPriceFonts, 5, 0x3);
+        if (_tk.ticker) {
+            // A price with an integer part of 1 000 or more drops its fraction
+            // when that is what keeps the largest size: "84 014.90" is 300 px
+            // at 18 pt x2 and would fall to 12 pt x2, "84 015" fits (docs/TICKERS.md
+            // "What the screen shows"). Only the first step is tried both ways -
+            // on the smaller steps the whole string stays. fit_text returns
+            // the text itself when it fits without truncation.
+            char buf[128 + 4], trimmed[32];
+            const char* price = _last_message;
+            if (fit_text(price, kPriceFonts, 1, TEXT_MAX_W, bottom - top, 0x1, buf, sizeof(buf)) != price
+                && ticker_price_trim_round(price, trimmed, sizeof(trimmed))
+                && fit_text(trimmed, kPriceFonts, 1, TEXT_MAX_W, bottom - top, 0x1, buf, sizeof(buf)) == trimmed)
+                price = trimmed;
+            print_centered_fitted(price, top, bottom, kPriceFonts, 5, 0x3);
+        }
         else print_centered_fitted(_last_message, top, bottom, kValueFonts, 4, 0x1);
     }
 }

@@ -96,7 +96,10 @@ machine; it uses two helpers (`device_offline_card_due()`,
 
 * **CONTENT.** Battery badge: outline with a fill proportional to the
   level and the percentage in 9 pt; on USB the bolt is the only power mark.
-  Ticker: price cascade 18 pt ×2 → 12 pt ×2 → 18 → 12 → 9; the sparkline
+  Ticker: price cascade 18 pt ×2 → 12 pt ×2 → 18 → 12 → 9 – a bare number
+  of 1 000 or more that misses 18 pt ×2 is retried there without its
+  fraction before the cascade steps down ([`TICKERS.md`](TICKERS.md) →
+  *What the screen shows*); the sparkline
   is shortened to keep clear of a long age line; the age line reads *just
   now* under 60 s, `N min / h / d ago`, `stale N …` past `T_stale`, or a
   `time` string verbatim. A title/value payload keeps the text look.

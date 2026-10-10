@@ -53,6 +53,16 @@ void ticker_age_line(uint32_t age_s, bool stale, char* buf, size_t len);
 // refresh per minute, docs/DEVICE_UI.md "E-ink refresh rules").
 bool ticker_stale_crossing(bool* fired, bool shows_age, uint32_t age_s, uint32_t stale_s);
 
+// The price without its fraction (docs/TICKERS.md "What the screen shows"):
+// hal_display asks for it when the whole string misses the largest size of
+// the price cascade. Accepts only `[-]digits[.digits]` with an optional
+// thousands separator (space or comma, groups of three) and an integer part
+// of at least four digits (>= 1 000); rounds half-up on the first fraction
+// digit, the carry re-grouped with the same separator ("9 999.99" -> "10 000").
+// Anything else - a value under 1 000, no fraction, a currency sign, a proxy's
+// free text - returns false and leaves `out` empty. `cap` is the size of `out`.
+bool ticker_price_trim_round(const char* in, char* out, size_t cap);
+
 // LED rule (docs/TICKERS.md "What the screen shows"): the device setting.
 enum LedRule : uint8_t {
     LED_RULE_OFF  = 0,   // the payload's alert.led as today (default)

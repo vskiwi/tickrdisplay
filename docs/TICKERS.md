@@ -120,7 +120,12 @@ layout notes*).
   **2** from 1, **4** from 0.01, else **6** – or a fixed 0–6; a thousands
   separator every three digits: **space** (`84 000.06`, the default – the
   e-ink fonts are ASCII only), **comma** or none. This applies to what the
-  device fetches; a proxy's `value` is drawn as sent.
+  device fetches; a proxy's `value` is drawn as sent. On the panel a price
+  with an integer part of 1 000 or more is shown **without its fraction**
+  (`84 014.90` → `84 015`, rounded half-up) when the full string does not
+  fit the largest size of the price cascade; a price that fits keeps its
+  decimals, and the *Decimals* / *Separator* settings still shape the
+  string itself (what *Test* returns as `price`).
 * **Change**: `+0.07%` / `-1.23%` / `0.00%` (no sign when it rounds to
   zero) with a filled triangle up or down, a dash for flat. Without a change
   path the top row shows the label only.

@@ -16,6 +16,11 @@ Until `1.0.0` minor versions may contain breaking changes.
   under `src/`), core dumps to flash are disabled (a panic still prints its
   backtrace and reboots), and the web pages are packed with zopfli when the
   module is installed.
+- **Ticker look**: a price with an integer part of 1 000 or more drops its
+  fraction (`84 014.90` → `84 015`, rounded half-up) when that keeps the
+  largest price size on the panel instead of stepping down to the next one;
+  a price that fits whole keeps its decimals, and the *Decimals* /
+  *Separator* settings are unchanged.
 
 ## [0.2.0] - 2026-09-29
 

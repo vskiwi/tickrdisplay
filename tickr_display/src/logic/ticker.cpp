@@ -70,6 +70,75 @@ bool ticker_stale_crossing(bool* fired, bool shows_age, uint32_t age_s, uint32_t
     return true;
 }
 
+bool ticker_price_trim_round(const char* in, char* out, size_t cap) {
+    if (!out || cap == 0) return false;
+    out[0] = '\0';
+    if (!in) return false;
+    const char* p = in;
+    bool neg = false;
+    if (*p == '-') { neg = true; p++; }
+    // integer part: digits with one kind of separator between groups of three
+    char digits[20];
+    size_t nd = 0, group = 0;
+    char sep = 0;
+    bool grouped = false;
+    for (;; p++) {
+        if (*p >= '0' && *p <= '9') {
+            if (nd >= sizeof(digits) - 1) return false;
+            digits[nd++] = *p;
+            group++;
+            if (grouped && group > 3) return false;         // "1 2345" - not a thousands grouping
+            continue;
+        }
+        if ((*p == ' ' || *p == ',') && group >= 1 && group <= 3 && (sep == 0 || *p == sep)
+            && p[1] >= '0' && p[1] <= '9') {
+            if (grouped && group != 3) return false;        // "12 34 567" - groups after the first are three digits
+            sep = *p;
+            grouped = true;
+            group = 0;
+            continue;
+        }
+        break;
+    }
+    if (nd < 4 || digits[0] == '0') return false;           // under 1 000 (or a leading zero): keep the cents
+    if (grouped && group != 3) return false;                // "1 23.45"
+    // fraction: at least one digit, then the end of the string
+    if (*p != '.') return false;
+    p++;
+    if (*p < '0' || *p > '9') return false;
+    const bool up = *p >= '5';
+    for (; *p >= '0' && *p <= '9'; p++) {}
+    if (*p) return false;                                   // "%", a currency, blanks: not a bare number
+    // half-up: carry from the right; an overflow adds a leading '1'
+    if (up) {
+        size_t i = nd;
+        while (i > 0) {
+            i--;
+            if (digits[i] == '9') { digits[i] = '0'; continue; }
+            digits[i]++;
+            break;
+        }
+        if (i == 0 && digits[0] == '0') {                   // all nines rolled over
+            memmove(digits + 1, digits, nd);
+            digits[0] = '1';
+            nd++;
+        }
+    }
+    // emit: sign, groups of three from the right with the same separator
+    size_t o = 0;
+    if (neg) { if (o + 1 >= cap) goto tight; out[o++] = '-'; }
+    for (size_t i = 0; i < nd; i++) {
+        if (sep && i > 0 && (nd - i) % 3 == 0) { if (o + 1 >= cap) goto tight; out[o++] = sep; }
+        if (o + 1 >= cap) goto tight;
+        out[o++] = digits[i];
+    }
+    out[o] = '\0';
+    return true;
+tight:
+    out[0] = '\0';
+    return false;
+}
+
 const char* led_rule_str(uint8_t v) {
     return v == LED_RULE_SIGN ? "sign" : "off";
 }

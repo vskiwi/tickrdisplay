@@ -149,6 +149,81 @@ void test_spark_caps_at_48_and_huge_values(void) {
     for (int i = 0; i < TICKER_SPARK_MAX; i++) TEST_ASSERT_TRUE(out[i] < TICKER_SPARK_H);
 }
 
+// --- price without its fraction ------------------------------------------------
+
+static const char* trim(const char* in, char* out, size_t cap) {
+    memset(out, 'X', cap);
+    return ticker_price_trim_round(in, out, cap) ? out : NULL;
+}
+
+void test_price_trim_rounds_half_up(void) {
+    char b[32];
+    TEST_ASSERT_EQUAL_STRING("84 015", trim("84 014.90", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("84 014", trim("84 014.49", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("84 015", trim("84 014.50", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("84 014", trim("84 014.4999", b, sizeof(b)));   // only the first fraction digit decides
+    TEST_ASSERT_EQUAL_STRING("1 000", trim("1 000.0", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("-1 235", trim("-1 234.50", b, sizeof(b)));
+}
+
+void test_price_trim_carry_regroups(void) {
+    char b[32];
+    TEST_ASSERT_EQUAL_STRING("10 000", trim("9 999.99", b, sizeof(b)));       // a new group, same separator
+    TEST_ASSERT_EQUAL_STRING("10,000", trim("9,999.5", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("10000", trim("9999.99", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("1 000 000", trim("999 999.50", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("11 000", trim("10 999.5", b, sizeof(b)));
+}
+
+void test_price_trim_separators(void) {
+    char b[32];
+    TEST_ASSERT_EQUAL_STRING("84,015", trim("84,014.90", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("84015", trim("84014.90", b, sizeof(b)));
+    TEST_ASSERT_EQUAL_STRING("1 234 568", trim("1 234 567.89", b, sizeof(b)));
+    // "2 695.42" trims fine - the renderer just never asks: the whole string
+    // already fits the largest size, so the cents stay on the panel
+    TEST_ASSERT_EQUAL_STRING("2 695", trim("2 695.42", b, sizeof(b)));
+    // not a thousands grouping: mixed separators, wrong group sizes
+    TEST_ASSERT_NULL(trim("84,014 567.9", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("1 2345.6", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("12 34 567.8", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("1 23.45", b, sizeof(b)));
+}
+
+void test_price_trim_refuses_what_it_should(void) {
+    char b[32];
+    TEST_ASSERT_NULL(trim("999.99", b, sizeof(b)));          // under 1 000: the cents matter
+    TEST_ASSERT_NULL(trim("1 234 567", b, sizeof(b)));       // no fraction to drop
+    TEST_ASSERT_NULL(trim("84 014.", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("0.08123456", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("0 123.45", b, sizeof(b)));        // leading zero
+    TEST_ASSERT_NULL(trim("abc", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim(NULL, b, sizeof(b)));
+    // a proxy's free text: currency signs, blanks, a percent - drawn as sent
+    TEST_ASSERT_NULL(trim("$95,240.50", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("95 240.50 USD", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim(" 84 014.90", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("84 014.90%", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("+84 014.90", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("84 014.9a", b, sizeof(b)));
+    TEST_ASSERT_NULL(trim("12345678901234567890.5", b, sizeof(b)));   // too many digits for the buffer
+    TEST_ASSERT_EQUAL_CHAR('\0', b[0]);                      // a refusal leaves an empty string
+}
+
+void test_price_trim_tight_buffer(void) {
+    char b[7];
+    TEST_ASSERT_EQUAL_STRING("84 015", trim("84 014.90", b, sizeof(b)));   // exactly fits
+    char t[6];
+    TEST_ASSERT_NULL(trim("84 014.90", t, sizeof(t)));       // one short: refused, never overrun
+    TEST_ASSERT_EQUAL_CHAR('\0', t[0]);
+    TEST_ASSERT_NULL(trim("-1 234.50", t, sizeof(t)));
+    char one[1];
+    TEST_ASSERT_NULL(trim("84 014.90", one, sizeof(one)));
+    TEST_ASSERT_FALSE(ticker_price_trim_round("84 014.90", b, 0));
+    TEST_ASSERT_FALSE(ticker_price_trim_round("84 014.90", NULL, 8));
+}
+
 // --- LED rule ------------------------------------------------------------------
 
 void test_led_rule_off_uses_payload_led_only(void) {
@@ -197,6 +272,11 @@ int main(int, char**) {
     RUN_TEST(test_spark_minmax_to_height);
     RUN_TEST(test_spark_flat_single_and_nan);
     RUN_TEST(test_spark_caps_at_48_and_huge_values);
+    RUN_TEST(test_price_trim_rounds_half_up);
+    RUN_TEST(test_price_trim_carry_regroups);
+    RUN_TEST(test_price_trim_separators);
+    RUN_TEST(test_price_trim_refuses_what_it_should);
+    RUN_TEST(test_price_trim_tight_buffer);
     RUN_TEST(test_led_rule_off_uses_payload_led_only);
     RUN_TEST(test_led_rule_sign_table);
     RUN_TEST(test_led_rule_strings);
