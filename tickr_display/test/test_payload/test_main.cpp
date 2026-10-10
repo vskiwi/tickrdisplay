@@ -237,8 +237,30 @@ void test_nodered_appendix_a_shape(void) {
     TEST_ASSERT_FALSE(payload_is_ticker(P));
 }
 
+void test_short_field(void) {
+    // the badge name travels with the ticker fields; absent = ""
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"value\":\"84 015\",\"change\":\"+0.1%\",\"short\":\"BTC\"}"));
+    TEST_ASSERT_EQUAL_STRING("BTC", P.short_label);
+    TEST_ASSERT_TRUE(payload_is_ticker(P));
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"value\":\"84 015\",\"change\":\"+0.1%\"}"));
+    TEST_ASSERT_EQUAL_STRING("", P.short_label);
+    // 7 chars fit, 8 do not; a number is text like the other fields
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"short\":\"BITCOIN\"}"));
+    TEST_ASSERT_EQUAL_STRING("BITCOIN", P.short_label);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"short\":\"ETHEREUM\"}"));
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"short\":42}"));
+    TEST_ASSERT_EQUAL_STRING("42", P.short_label);
+    // printable ASCII only (the badge font is Latin-1, the field is tiny)
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"short\":\"\\u20ac5\"}"));
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"short\":\"a\\tb\"}"));
+    // `short` alone is a recognised field but not a ticker layout by itself
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"short\":\"X\"}"));
+    TEST_ASSERT_FALSE(payload_is_ticker(P));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_short_field);
     RUN_TEST(test_ticker_fields_full);
     RUN_TEST(test_plain_payload_is_not_a_ticker);
     RUN_TEST(test_dir_derived_and_string_forms);

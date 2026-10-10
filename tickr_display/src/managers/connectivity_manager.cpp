@@ -364,6 +364,7 @@ void ConnectivityManager::handle_config_api(AsyncWebServerRequest* request) {
     doc["tk_decimals"]      = t.decimals;                        // 255 = auto
     doc["tk_sep"]           = source_sep_str(t.sep);
     doc["tk_label"]         = t.label;
+    doc["tk_short"]         = t.short_label;                     // "" = derived from the symbol (Test returns it)
     doc["tk_api_key_set"]   = _config.tk_api_key[0] != '\0';    // reserved; the key itself never leaves the device
     String body;
     serializeJson(doc, body);
@@ -429,10 +430,11 @@ void ConnectivityManager::parse_source_params(AsyncWebServerRequest* request, ui
     copy_field(request, "tk_change", tk.path_change, sizeof(tk.path_change), false, err);
     copy_field(request, "tk_spark", tk.path_spark, sizeof(tk.path_spark), false, err);
     copy_field(request, "tk_label", tk.label, sizeof(tk.label), true, err);
+    copy_field(request, "tk_short", tk.short_label, sizeof(tk.short_label), false, err);   // <= 7 printable, no spaces
     if (!is_token(tk.symbol) || !is_token(tk.market) || !is_token(tk.path_price) || !is_token(tk.path_change) || !is_token(tk.path_spark)) {
         err += "tk_symbol/market/price/change/spark: letters, digits, . _ - only. ";
     }
-    if (strpbrk(tk.url, "\"\\") || strpbrk(tk.label, "\"\\")) err += "tk_url / tk_label: no quotes or backslashes. ";
+    if (strpbrk(tk.url, "\"\\") || strpbrk(tk.label, "\"\\") || strpbrk(tk.short_label, "\"\\")) err += "tk_url / tk_label / tk_short: no quotes or backslashes. ";
     if (tk.url[0] && strncasecmp(tk.url, "http://", 7) != 0 && strncasecmp(tk.url, "https://", 8) != 0) {
         err += "tk_url: must start with http:// or https://. ";
     }
@@ -1333,6 +1335,7 @@ bool ConnectivityManager::fetch_ticker() {
         memset(p, 0, sizeof(*p));
         p->has_text = true;
         strlcpy(p->title, plan.label, sizeof(p->title));
+        strlcpy(p->short_label, plan.short_label, sizeof(p->short_label));
         strlcpy(p->value, res->price, sizeof(p->value));
         if (res->has_change) {
             strlcpy(p->change, res->change, sizeof(p->change));
@@ -1375,11 +1378,12 @@ bool ConnectivityManager::fetch_ticker() {
 // POST /api/source/test - one fetch with the posted (unsaved) source, the
 // editor's Test button (docs/TICKERS.md "Setting it up in the web UI"). Form parameters as POST /config
 // (tk_preset, tk_symbol, tk_market, tk_url, tk_price, tk_change, tk_spark,
-// tk_mode, tk_decimals, tk_sep, tk_label). The handler validates and pauses
+// tk_mode, tk_decimals, tk_sep, tk_label, tk_short). The handler validates and pauses
 // the request; the fetch runs on the main task (run_source_test() from
 // loop()) because the async_tcp task must not block for a 10 s TLS round
-// trip, and the paused request is answered from there:
-//   {"ok":true,"price":"84 000.06","change":"+0.07%","dir":1,"label":"...","url":"...","ms":812}
+// trip, and the paused request is answered from there (`short` = the badge
+// name the device would draw - the posted one or the derived default):
+//   {"ok":true,"price":"84 000.06","change":"+0.07%","dir":1,"label":"...","short":"BTC","url":"...","ms":812}
 //   {"ok":false,"error":"http 451","url":"...","ms":1830}
 // Nothing is drawn, nothing is saved, the sparkline history is not touched.
 // 409 while another test runs; the answer is dropped when the browser has
@@ -1414,13 +1418,13 @@ void ConnectivityManager::run_source_test() {
     uint32_t ms = 0;
     bool ok = WiFi.isConnected() && fetch_source(_test_plan, _test_custom, res, err, sizeof(err), &ms);
     // strings are quote-free by validation (label, url) or by construction (price, change, error)
-    char body[SRC_URL_MAX + SRC_LABEL_MAX + SRC_PRICE_MAX + TICKER_CHANGE_MAX + TICKER_TIME_MAX + 112];
+    char body[SRC_URL_MAX + SRC_LABEL_MAX + TICKER_SHORT_MAX + SRC_PRICE_MAX + TICKER_CHANGE_MAX + TICKER_TIME_MAX + 128];
     if (ok) {
         // "funding" only for the futures presets: "" = the second request failed
         char funding[TICKER_TIME_MAX + 16] = "";
         if (_test_plan.url_funding[0]) snprintf(funding, sizeof(funding), ",\"funding\":\"%s\"", res->funding);
-        snprintf(body, sizeof(body), "{\"ok\":true,\"price\":\"%s\",\"change\":\"%s\",\"dir\":%d,\"label\":\"%s\",\"url\":\"%s\"%s,\"ms\":%lu}",
-                 res->price, res->change, (int)res->dir, _test_plan.label, _test_plan.url, funding, (unsigned long)ms);
+        snprintf(body, sizeof(body), "{\"ok\":true,\"price\":\"%s\",\"change\":\"%s\",\"dir\":%d,\"label\":\"%s\",\"short\":\"%s\",\"url\":\"%s\"%s,\"ms\":%lu}",
+                 res->price, res->change, (int)res->dir, _test_plan.label, _test_plan.short_label, _test_plan.url, funding, (unsigned long)ms);
     } else {
         // the test's own failure must not linger as the device's last_error
         if (strncmp(_last_error, "pull:", 5) == 0) _last_error[0] = '\0';

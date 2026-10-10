@@ -78,6 +78,12 @@
 // Badge zone: the bottom BADGE_H rows, right-aligned; the content value is
 // laid out above it.
 #define BADGE_H                 16
+// Name badge of a ticker frame (docs/TICKERS.md "What the screen shows"): the
+// short name white on a black field in the top-left NAME_BADGE_H rows, NAME_BADGE_PAD
+// px of padding, at most NAME_BADGE_MAX_W wide (the change needs the rest of the row).
+#define NAME_BADGE_H            30
+#define NAME_BADGE_PAD          6
+#define NAME_BADGE_MAX_W        150
 
 // Canvas colours: GFXcanvas1 sets the bit for any non-zero colour, so black
 // (= bit set, drawn by drawBitmap in GxEPD_BLACK) is 1 here - the inverse of
@@ -412,11 +418,32 @@ static uint32_t ticker_total_age_s() {
     return (_tk.age_s == TICKER_AGE_UNKNOWN ? 0 : _tk.age_s) + elapsed;
 }
 
+// The short name of a ticker white on a black field at the top left: 18 pt,
+// 12 pt or 9 pt - the largest that keeps the field within NAME_BADGE_MAX_W -
+// centred in the field's height. Returns the field's width.
+static int16_t draw_name_badge(const char* text) {
+    static const GFXfont* const kBadgeFonts[] = { &FreeSansBold18pt7b, &FreeSansBold12pt7b, &FreeSansBold9pt7b };
+    char buf[TICKER_SHORT_MAX + 4];
+    const char* s = fit_text(text, kBadgeFonts, 3, NAME_BADGE_MAX_W - 2 * NAME_BADGE_PAD, 0, 0, buf, sizeof(buf));
+    int16_t bx, by; uint16_t bw, bh;
+    canvas.getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
+    int16_t w = (int16_t)bw + 2 * NAME_BADGE_PAD;
+    canvas.fillRect(0, 0, w, NAME_BADGE_H, CV_BLACK);
+    canvas.setTextColor(CV_WHITE);
+    canvas.setCursor(NAME_BADGE_PAD - bx, (NAME_BADGE_H - (int16_t)bh) / 2 - by);
+    canvas.print(s);
+    canvas.setTextColor(CV_BLACK);
+    return w;
+}
+
 // Content: title 9 pt at the top left, value centred in the rest of the
 // height (18 pt doubled -> 18 -> 12 -> 9 pt), badges below (docs/DEVICE_UI.md "Screens").
 // Ticker (docs/TICKERS.md "What the screen shows"): the change with its triangle top right, the
 // price centred in rows 18-92, the sparkline bottom left (200 x 24), the age
-// line (or the pass-through time) right-aligned above the badges.
+// line (or the pass-through time) right-aligned above the badges. With a
+// short name the top row is the name badge (rows 0-29), the change 12 pt
+// right of it with the full label 9 pt in between only when it fits whole,
+// and the price moves down to rows 32-92; without one the frame is as before.
 static void draw_content() {
     static const GFXfont* const kTitleFonts[] = { &FreeSansBold9pt7b };
     static const GFXfont* const kValueFonts[] = { &FreeSansBold18pt7b, &FreeSansBold18pt7b, &FreeSansBold12pt7b, &FreeSansBold9pt7b };
@@ -426,7 +453,32 @@ static void draw_content() {
     int16_t bx, by; uint16_t bw, bh;
     int16_t title_w = TEXT_MAX_W;
     int16_t top = 0, bottom = SCREEN_H - BADGE_H;
-    if (_tk.ticker) {
+    const bool badge = _tk.ticker && _tk.short_label[0];
+    if (badge) {
+        top = 32;
+        bottom = 92;
+        int16_t badge_w = draw_name_badge(_tk.short_label);
+        int16_t room_right = SCREEN_W - TEXT_MARGIN_X;   // where the full label must end
+        if (_tk.change[0]) {
+            canvas.setFont(&FreeSansBold12pt7b);
+            canvas.getTextBounds(_tk.change, 0, 0, &bx, &by, &bw, &bh);
+            int16_t cx = SCREEN_W - TEXT_MARGIN_X - (int16_t)bw;
+            canvas.setCursor(cx - bx, (NAME_BADGE_H - (int16_t)bh) / 2 - by);
+            canvas.print(_tk.change);
+            draw_dir(cx - 15, (NAME_BADGE_H - 6) / 2, _tk.dir);
+            room_right = cx - 15 - 6;
+        }
+        if (_last_title[0]) {
+            // the full label only when it fits whole between badge and change
+            int16_t x = badge_w + 8;
+            canvas.setFont(&FreeSansBold9pt7b);
+            canvas.getTextBounds(_last_title, 0, 0, &bx, &by, &bw, &bh);
+            if (x + (int16_t)bw <= room_right) {
+                canvas.setCursor(x - bx, (NAME_BADGE_H - (int16_t)bh) / 2 - by);
+                canvas.print(_last_title);
+            }
+        }
+    } else if (_tk.ticker) {
         top = 18;
         bottom = 92;
         canvas.setFont(&FreeSansBold9pt7b);
@@ -438,6 +490,9 @@ static void draw_content() {
             draw_dir(cx - 15, 5, _tk.dir);
             title_w = cx - 15 - 6 - TEXT_MARGIN_X;
         }
+    }
+    if (_tk.ticker) {
+        canvas.setFont(&FreeSansBold9pt7b);
         char age[24];
         if (_tk.time[0]) strlcpy(age, _tk.time, sizeof(age));
         else {
@@ -457,7 +512,7 @@ static void draw_content() {
         }
         draw_sparkline(TEXT_MARGIN_X, 100, spark_w, TICKER_SPARK_H, _tk.spark, _tk.spark_n);
     }
-    if (_last_title[0]) {
+    if (_last_title[0] && !badge) {
         print_fitted(_last_title, TEXT_MARGIN_X, 14, kTitleFonts, 1, title_w);
         if (!top) top = 20;
     }
@@ -653,7 +708,11 @@ static void draw_base(uint8_t event) {
         draw_badges();
         _state = has ? SCREEN_CONTENT : SCREEN_WAITING;
         kind = has ? (_tk.ticker ? SHOWN_TICKER : SHOWN_TEXT) : SHOWN_WAITING;
-        if (_tk.ticker) title = esp_rom_crc32_le(0, (const uint8_t*)_last_title, strlen(_last_title));
+        // the title and the badge name: another name on the badge is a layout change too
+        if (_tk.ticker) {
+            title = esp_rom_crc32_le(0, (const uint8_t*)_last_title, strlen(_last_title));
+            title = esp_rom_crc32_le(title, (const uint8_t*)_tk.short_label, strlen(_tk.short_label));
+        }
     }
     present(event, kind, title, condition);
 }

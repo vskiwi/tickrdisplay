@@ -11,6 +11,7 @@
 #define TICKER_TIME_MAX     16     // pass-through time string (MOEX "19:00")
 #define TICKER_SPARK_MAX    48     // points drawn; extra points are ignored
 #define TICKER_SPARK_H      24     // sparkline box height in px (200 x 24)
+#define TICKER_SHORT_MAX    8      // short name on the badge: up to 7 chars ("BTC", "BITCOIN")
 #define TICKER_AGE_UNKNOWN  0xFFFFFFFFu
 
 // Direction of the change: -1 down, 0 flat, +1 up (payload "dir").
@@ -27,6 +28,7 @@ struct TickerFields {
     char     time[TICKER_TIME_MAX];       // "" = relative age instead
     uint8_t  spark[TICKER_SPARK_MAX];     // rows 0 (bottom) .. TICKER_SPARK_H-1 (top)
     uint8_t  spark_n;                     // 0 or 1 = nothing to draw
+    char     short_label[TICKER_SHORT_MAX]; // "" = no badge, the title row as for a text frame
 };
 
 // Sign of a formatted change string: leading '+' / '-' / U+2212 (after

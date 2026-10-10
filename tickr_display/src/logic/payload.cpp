@@ -259,9 +259,22 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
         }
         recognised++;
     }
+    JsonVariantConst shrt = root["short"];
+    if (!shrt.isNull()) {
+        if (!copy_text_field(shrt, "short", out->short_label, sizeof(out->short_label), err, err_len))
+            return PAYLOAD_ERR_FIELD;
+        // the badge font is Latin-1 and the field is tiny: printable ASCII only
+        for (const char* c = out->short_label; *c; c++) {
+            if ((unsigned char)*c < 0x20 || (unsigned char)*c > 0x7E) {
+                set_err(err, err_len, "short: printable ASCII, up to 7 chars");
+                return PAYLOAD_ERR_FIELD;
+            }
+        }
+        recognised++;
+    }
 
     if (recognised == 0) {
-        set_err(err, err_len, "no recognised fields (title, value, alert, change, dir, age_s, time, spark)");
+        set_err(err, err_len, "no recognised fields (title, value, alert, change, dir, age_s, time, spark, short)");
         return PAYLOAD_ERR_NOTHING_TO_DO;
     }
     return PAYLOAD_OK;

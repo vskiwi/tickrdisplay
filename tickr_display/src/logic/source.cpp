@@ -115,6 +115,44 @@ void source_spec_defaults(SourceSpec* s) {
     s->sep = SRC_SEP_SPACE;
 }
 
+// CoinGecko ids -> tickers for the badge, one packed string ("id\0TICKER\0"
+// pairs, an empty id ends it). Common coins only; the rest is the id upper-cased.
+static const char kGeckoShort[] =
+    "bitcoin\0BTC\0" "ethereum\0ETH\0" "tether\0USDT\0" "binancecoin\0BNB\0" "solana\0SOL\0"
+    "ripple\0XRP\0" "usd-coin\0USDC\0" "cardano\0ADA\0" "dogecoin\0DOGE\0" "tron\0TRX\0"
+    "avalanche-2\0AVAX\0" "chainlink\0LINK\0" "polkadot\0DOT\0" "the-open-network\0TON\0" "shiba-inu\0SHIB\0"
+    "litecoin\0LTC\0" "bitcoin-cash\0BCH\0" "stellar\0XLM\0" "monero\0XMR\0" "uniswap\0UNI\0";
+// Quote currencies a pair typed into the symbol may end with (longest first).
+static const char kQuotes[] = "FDUSD\0USDT\0USDC\0BUSD\0USD\0EUR\0GBP\0TRY\0BTC\0ETH\0BNB\0";
+
+void source_short_default(const SourceSpec& s, char* out, size_t n) {
+    if (!out || n == 0) return;
+    out[0] = '\0';
+    if (!s.symbol[0]) return;
+    char sym[SRC_SYMBOL_MAX];
+    cpy(sym, sizeof(sym), s.symbol);
+    if (s.preset == SRC_PRESET_COINGECKO) {
+        fold(sym, FOLD_LOWER);
+        for (const char* p = kGeckoShort; *p; ) {
+            const char* tick = p + strlen(p) + 1;
+            if (strcmp(p, sym) == 0) { cpy(out, n, tick); return; }
+            p = tick + strlen(tick) + 1;
+        }
+    } else if (!s.market[0]) {
+        // "BTCUSDT" / "XBTUSD" / "BTCUSD_PERP" as one word: the base only
+        char* u = strchr(sym, '_');
+        if (u) *u = '\0';
+        fold(sym, FOLD_UPPER);
+        size_t l = strlen(sym);
+        for (const char* q = kQuotes; *q; q += strlen(q) + 1) {
+            size_t ql = strlen(q);
+            if (l > ql + 1 && strcmp(sym + l - ql, q) == 0) { sym[l - ql] = '\0'; break; }
+        }
+    }
+    fold(sym, FOLD_UPPER);
+    cpy(out, n, sym);   // snprintf cuts to n-1 chars
+}
+
 bool source_resolve(const SourceSpec& s, SourcePlan* out) {
     memset(out, 0, sizeof(*out));
     out->decimals = s.decimals > SRC_DECIMALS_MAX ? SRC_DECIMALS_AUTO : s.decimals;
@@ -174,6 +212,8 @@ bool source_resolve(const SourceSpec& s, SourcePlan* out) {
     } else {
         cpy(out->label, sizeof(out->label), sym[0] ? sym : "Ticker");
     }
+    if (s.short_label[0]) cpy(out->short_label, sizeof(out->short_label), s.short_label);
+    else source_short_default(s, out->short_label, sizeof(out->short_label));
     return true;
 }
 

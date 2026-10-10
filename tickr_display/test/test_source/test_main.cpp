@@ -467,8 +467,72 @@ void test_result_change_feeds_t1_direction(void) {
     TEST_ASSERT_EQUAL_INT(ticker_dir_from_change(r.change), r.dir);
 }
 
+// --- short name for the badge (docs/TICKERS.md "What the screen shows") -------
+
+static const char* shrt(const SourceSpec& s) {
+    static char out[TICKER_SHORT_MAX];
+    memset(out, 'X', sizeof(out));
+    source_short_default(s, out, sizeof(out));
+    return out;
+}
+
+void test_short_default_exchange_presets(void) {
+    TEST_ASSERT_EQUAL_STRING("BTC", shrt(spec(SRC_PRESET_BINANCE, "btc", "USDT")));
+    TEST_ASSERT_EQUAL_STRING("XBT", shrt(spec(SRC_PRESET_KRAKEN, "XBT", "USD")));      // Kraken's own name stays
+    TEST_ASSERT_EQUAL_STRING("ETH", shrt(spec(SRC_PRESET_BINANCE_USDM, "eth", "USDT_261225")));
+    TEST_ASSERT_EQUAL_STRING("BTC", shrt(spec(SRC_PRESET_BINANCE_COINM, "BTC", "USD_PERP")));
+    TEST_ASSERT_EQUAL_STRING("DOGE", shrt(spec(SRC_PRESET_CUSTOM, "doge", "")));
+    // a pair typed as one word with an empty market: the base only
+    TEST_ASSERT_EQUAL_STRING("BTC", shrt(spec(SRC_PRESET_BINANCE, "BTCUSDT", "")));
+    TEST_ASSERT_EQUAL_STRING("BNB", shrt(spec(SRC_PRESET_BINANCE, "bnbusdt", "")));     // USDT before USD
+    TEST_ASSERT_EQUAL_STRING("XBT", shrt(spec(SRC_PRESET_KRAKEN, "XBTUSD", "")));
+    TEST_ASSERT_EQUAL_STRING("BTC", shrt(spec(SRC_PRESET_BINANCE_COINM, "BTCUSD_PERP", "")));
+    TEST_ASSERT_EQUAL_STRING("ETH", shrt(spec(SRC_PRESET_BINANCE, "ETHBTC", "")));
+    // a symbol that is itself a quote currency, or too short to be a pair, is kept
+    TEST_ASSERT_EQUAL_STRING("USDT", shrt(spec(SRC_PRESET_BINANCE, "USDT", "")));
+    TEST_ASSERT_EQUAL_STRING("BTC", shrt(spec(SRC_PRESET_BINANCE, "BTC", "")));
+    TEST_ASSERT_EQUAL_STRING("BUSD", shrt(spec(SRC_PRESET_BINANCE, "BUSD", "")));
+    // with a market the symbol is taken as the base, whatever it ends with
+    TEST_ASSERT_EQUAL_STRING("BTCUSDT", shrt(spec(SRC_PRESET_BINANCE, "BTCUSDT", "USDT")));
+    // cut to 7
+    TEST_ASSERT_EQUAL_STRING("LONGSYM", shrt(spec(SRC_PRESET_BINANCE, "longsymbol", "USDT")));
+    TEST_ASSERT_EQUAL_STRING("", shrt(spec(SRC_PRESET_CUSTOM, "", "")));
+}
+
+void test_short_default_coingecko_table_and_fallback(void) {
+    TEST_ASSERT_EQUAL_STRING("BTC", shrt(spec(SRC_PRESET_COINGECKO, "bitcoin", "usd")));
+    TEST_ASSERT_EQUAL_STRING("BTC", shrt(spec(SRC_PRESET_COINGECKO, "Bitcoin", "usd")));   // ids are folded like the URL
+    TEST_ASSERT_EQUAL_STRING("ETH", shrt(spec(SRC_PRESET_COINGECKO, "ethereum", "eur")));
+    TEST_ASSERT_EQUAL_STRING("AVAX", shrt(spec(SRC_PRESET_COINGECKO, "avalanche-2", "usd")));
+    TEST_ASSERT_EQUAL_STRING("TON", shrt(spec(SRC_PRESET_COINGECKO, "the-open-network", "usd")));
+    TEST_ASSERT_EQUAL_STRING("UNI", shrt(spec(SRC_PRESET_COINGECKO, "uniswap", "usd")));   // last entry
+    // unknown id: upper-cased, cut to 7
+    TEST_ASSERT_EQUAL_STRING("WRAPPED", shrt(spec(SRC_PRESET_COINGECKO, "wrapped-bitcoin", "usd")));
+    TEST_ASSERT_EQUAL_STRING("PEPE", shrt(spec(SRC_PRESET_COINGECKO, "pepe", "usd")));
+    // "bitcoin-cash" is not "bitcoin": whole ids only
+    TEST_ASSERT_EQUAL_STRING("BCH", shrt(spec(SRC_PRESET_COINGECKO, "bitcoin-cash", "usd")));
+}
+
+void test_resolve_carries_short_label(void) {
+    SourcePlan p;
+    SourceSpec s = spec(SRC_PRESET_BINANCE, "BTC", "USDT");
+    TEST_ASSERT_TRUE(source_resolve(s, &p));
+    TEST_ASSERT_EQUAL_STRING("BTC", p.short_label);                 // derived
+    snprintf(s.short_label, sizeof(s.short_label), "%s", "Bitcoin");
+    TEST_ASSERT_TRUE(source_resolve(s, &p));
+    TEST_ASSERT_EQUAL_STRING("Bitcoin", p.short_label);             // the user's text wins, case kept
+    s = spec(SRC_PRESET_CUSTOM, "", "");
+    snprintf(s.url, sizeof(s.url), "%s", "http://p/q");
+    snprintf(s.path_price, sizeof(s.path_price), "%s", "$.p");
+    TEST_ASSERT_TRUE(source_resolve(s, &p));
+    TEST_ASSERT_EQUAL_STRING("", p.short_label);                    // no symbol: no badge
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_short_default_exchange_presets);
+    RUN_TEST(test_short_default_coingecko_table_and_fallback);
+    RUN_TEST(test_resolve_carries_short_label);
     RUN_TEST(test_enum_strings_round_trip);
     RUN_TEST(test_pull_kind_and_schema7_migration);
     RUN_TEST(test_parse_num_accepts_plain_decimals);

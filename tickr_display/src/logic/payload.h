@@ -16,7 +16,8 @@
 //   "dir": 1,                      // -1 | 0 | 1, or "down" | "flat" | "up"; derived from the sign of `change` when absent
 //   "age_s": 120,                  // age of the quote at send time, seconds (the device adds its own elapsed time)
 //   "time": "19:00",               // pass-through string shown instead of the relative age, <= 15 chars
-//   "spark": [83950, 83990, 84001] // <= 48 numbers (the rest is ignored); non-numbers are skipped
+//   "spark": [83950, 83990, 84001],// <= 48 numbers (the rest is ignored); non-numbers are skipped
+//   "short": "BTC"                 // badge name on a ticker frame, <= 7 printable ASCII chars; absent = no badge
 // }
 // Every field is optional, but the document must be a JSON object and must
 // contain at least one recognised field. `change` or `spark` selects the
@@ -65,6 +66,7 @@ struct ScreenPayload {
     char     time[TICKER_TIME_MAX];      // "" = absent
     uint8_t  spark_n;                    // numeric points kept (<= TICKER_SPARK_MAX)
     float    spark[TICKER_SPARK_MAX];
+    char     short_label[TICKER_SHORT_MAX]; // "" = absent
 };
 // The ticker layout is selected by `change` or `spark` (docs/API.md "Payload format").
 static inline bool payload_is_ticker(const ScreenPayload& p) { return p.has_change || p.spark_n > 0; }

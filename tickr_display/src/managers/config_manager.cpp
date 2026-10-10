@@ -112,6 +112,7 @@ bool config_load(AppConfig& config) {
     t.decimals = (dec < 0 || dec > SRC_DECIMALS_MAX) ? SRC_DECIMALS_AUTO : (uint8_t)dec;
     t.sep = source_sep_parse(doc["tk_sep"] | "space");
     strlcpy(t.label, doc["tk_label"] | "", sizeof(t.label));
+    strlcpy(t.short_label, doc["tk_short"] | "", sizeof(t.short_label));   // absent in older files = auto
     strlcpy(config.tk_api_key, doc["tk_api_key"] | "", sizeof(config.tk_api_key));
 
     // Sanitise values that may come from an older / hand-edited file.
@@ -174,6 +175,7 @@ bool config_save(const AppConfig& config) {
     doc["tk_decimals"] = t.decimals;
     doc["tk_sep"] = source_sep_str(t.sep);
     doc["tk_label"] = t.label;
+    doc["tk_short"] = t.short_label;
     doc["tk_api_key"] = config.tk_api_key;
 
     String out;

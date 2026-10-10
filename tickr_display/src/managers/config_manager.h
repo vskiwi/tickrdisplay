@@ -14,6 +14,7 @@
 // 8: source_kind + the ticker source (preset / symbol / market / custom URL and
 //    paths / decimals / separator / label, api_key reserved) - docs/TICKERS.md "Presets" / "Custom JSON".
 //    Migration: a file without source_kind gets `url` when pull_url is set, else `none`.
+//    Same schema: tk_short (the badge name, "" = derived) - absent in older files.
 // Missing fields always fall back to their defaults, so older files load fine.
 #define CONFIG_SCHEMA_VERSION      8
 #define CONFIG_REFRESH_MIN_MINUTES 1

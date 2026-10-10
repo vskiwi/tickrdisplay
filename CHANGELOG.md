@@ -8,6 +8,18 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **Tickers**: the ticker's short name on a black badge top left of the panel
+  (`BTC`, `XBT`, `ETH` – up to 7 characters, 18 pt white on black, smaller
+  when longer), with the change beside it and the price below. Derived from
+  the symbol when the new *Short name* field under *Advanced* is empty
+  (`tk_short`): exchange symbols upper-cased, a pair typed as one word loses
+  its quote currency, the common CoinGecko ids map to their tickers; *Test*
+  returns the derived name. A proxy sets it with the payload field `short`;
+  a payload without one draws the frame as before. `/api/screen/state` adds
+  `short`.
+
 ### Changed
 
 - **Build**: smaller firmware image – the `printf` family comes from the ESP32

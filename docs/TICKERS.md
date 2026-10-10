@@ -108,14 +108,30 @@ For any API that answers a JSON document of at most **4096 bytes**.
 
 ## 4. What the screen shows
 
-Label and change with the triangle on the top row, the price centred and as
-large as it fits, the sparkline bottom-left, the age line bottom-right,
-badges in the corner ([`DEVICE_UI.md`](DEVICE_UI.md) → *Card texts and
-layout notes*).
+The short name on a black badge top left, the change with the triangle on
+the same row, the price centred below it and as large as it fits, the
+sparkline bottom-left, the age line bottom-right, badges in the corner
+([`DEVICE_UI.md`](DEVICE_UI.md) → *Card texts and layout notes*).
 
+* **Short name**: up to 7 characters white on black, 18 pt (12 or 9 pt
+  when the badge would grow past half the row). Empty = derived from the
+  symbol: the exchange presets and *Custom JSON* upper-case it (`btc` →
+  `BTC`, Kraken's `XBT` stays `XBT`; a pair typed as one word with an
+  empty market loses its quote currency – `BTCUSDT` → `BTC`,
+  `BTCUSD_PERP` → `BTC`); CoinGecko maps the common ids (`bitcoin` →
+  `BTC`, `ethereum` → `ETH`, `tether`, `binancecoin`, `solana`, `ripple`,
+  `usd-coin`, `cardano`, `dogecoin`, `tron`, `avalanche-2`, `chainlink`,
+  `polkadot`, `the-open-network`, `shiba-inu`, `litecoin`, `bitcoin-cash`,
+  `stellar`, `monero`, `uniswap`) and upper-cases any other id, cut to 7
+  (`wrapped-bitcoin` → `WRAPPED` – set your own under *Advanced*). *Test*
+  returns the name the device would draw. A proxy sends it as the payload
+  field `short` ([`API.md`](API.md) → *Payload format*); without one the
+  frame keeps the plain label row.
 * **Label**: `<symbol>/<market> - <Preset>` (`BTC/USDT - Binance`,
   `bitcoin/usd - CoinGecko`; the futures shapes are under *Binance
-  futures*), or your own text (≤ 31 chars).
+  futures*), or your own text (≤ 31 chars). Next to a badge it is drawn
+  only when it fits whole between the badge and the change; it is always
+  in the shelf tile's *Showing* line.
 * **Price**: rounded half-up to *auto* decimals – **0** from 1 000 000,
   **2** from 1, **4** from 0.01, else **6** – or a fixed 0–6; a thousands
   separator every three digits: **space** (`84 000.06`, the default – the
@@ -223,7 +239,9 @@ Shelf page (`/`) → click the device → **Content…** → *Source* = **Ticker
    perpetual adds the funding line (`FR +0.0048%`, or *funding: n/a* when
    only the second request failed). The browser cannot call the exchanges
    itself (CORS), the device can.
-5. **Advanced** – label, decimals, thousands separator, **LED rule**.
+5. **Advanced** – label, **short name** for the badge (≤ 7 chars; the
+   placeholder shows the derived name after a *Test*), decimals, thousands
+   separator, **LED rule**.
 6. **Save** – the device fetches at once and the tile preview follows.
 
 **Text → Send** or **Custom JSON URL → Save** on a ticker device afterwards

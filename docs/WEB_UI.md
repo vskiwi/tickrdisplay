@@ -62,8 +62,8 @@ it. Everything about the fleet is on the toolbar and in the drawer.
 3. *Text*: title and value, optional *Reactions* (LED colour, sound preset,
    volume, LED rule) → *Send*. *Ticker*: market preset (CoinGecko, Kraken,
    Binance, Custom JSON), symbol / market, interval, optional *Test* (one
-   fetch on the device, nothing saved), *Advanced* (label, decimals,
-   separator, LED rule) → *Save*. *Custom JSON URL*: URL + interval → *Save*.
+   fetch on the device, nothing saved), *Advanced* (label, short name for
+   the panel badge, decimals, separator, LED rule) → *Save*. *Custom JSON URL*: URL + interval → *Save*.
    *MQTT* shows broker and topic with a link to that device's `/system`;
    *Push only* shows a ready `curl` line.
 4. The card's next frame poll shows the result.

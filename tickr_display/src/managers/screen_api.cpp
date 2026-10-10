@@ -143,6 +143,7 @@ static void handle_state(AsyncWebServerRequest* request) {
     body += '"';
     if (st.ticker) {
         body += ",\"change\":"; json_str(body, st.ticker->change);
+        body += ",\"short\":"; json_str(body, st.ticker->short_label);   // the badge name, "" = no badge
         snprintf(num, sizeof(num), ",\"dir\":%d,\"age_s\":%lu", (int)st.ticker->dir, (unsigned long)st.ticker_age_s);
         body += num;
     }

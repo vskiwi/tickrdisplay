@@ -69,6 +69,7 @@ struct SourceSpec {
     uint8_t decimals;                     // SRC_DECIMALS_AUTO or 0..6
     uint8_t sep;                          // SourceSep
     char    label[SRC_LABEL_MAX];         // "" = "<symbol>/<market> - <Preset>"
+    char    short_label[TICKER_SHORT_MAX]; // badge text, "" = source_short_default()
 };
 
 // The fetch plan a spec resolves to.
@@ -81,6 +82,7 @@ struct SourcePlan {
     uint8_t decimals;
     uint8_t sep;
     char    label[SRC_LABEL_MAX];
+    char    short_label[TICKER_SHORT_MAX]; // the spec's, else the default; "" = no badge
     bool    https;
     // Second request of the futures presets: the funding rate ("" = none).
     // Same host and scheme as `url`; fetched after the price, its failure
@@ -91,6 +93,13 @@ struct SourcePlan {
 
 // Fills the defaults of a spec (CoinGecko, auto decimals, space separator).
 void source_spec_defaults(SourceSpec* s);
+// The short name drawn on the badge when the spec has none (docs/TICKERS.md
+// "What the screen shows"): exchange presets and Custom - the symbol
+// upper-cased ("btc" -> "BTC", Kraken's "XBT" stays), a pair typed into the
+// symbol with an empty market loses a known quote currency ("BTCUSDT" ->
+// "BTC"); CoinGecko - a table of common ids ("bitcoin" -> "BTC"), an unknown
+// id upper-cased. Cut to TICKER_SHORT_MAX-1 chars; "" without a symbol.
+void source_short_default(const SourceSpec& s, char* out, size_t n);
 // Expands the preset (or the custom URL: "{s}" / "{m}" replaced by symbol /
 // market) into a plan. False when the spec cannot be fetched: no symbol for a
 // preset, no URL or no price path for custom.

@@ -62,6 +62,7 @@ void renderer_apply(const ScreenPayload& p) {
             t.dir = p.has_dir ? p.dir : 0;
             t.age_s = p.has_age ? p.age_s : 0;    // relative age counts from the receipt
             strlcpy(t.time, p.time, sizeof(t.time));
+            strlcpy(t.short_label, p.short_label, sizeof(t.short_label));
             t.spark_n = ticker_spark_scale(p.spark, p.spark_n, t.spark, TICKER_SPARK_H);
         }
         display_show_content(p.title, p.value, &t);
