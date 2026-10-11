@@ -345,8 +345,53 @@ void test_led_rule_strings(void) {
     TEST_ASSERT_EQUAL_UINT8(LED_RULE_OFF, led_rule_parse(NULL));
 }
 
+// --- LED through deep sleep ------------------------------------------------------
+
+void test_led_battery_hold_rule(void) {
+    uint8_t r, g, b;
+    // off (the default): dark whatever the level and the colour
+    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_OFF, true, 100, 255, 0, 0, &r, &g, &b));
+    TEST_ASSERT_EQUAL_UINT8(0, r | g | b);
+    // hold: the base colour, thresholded per channel, from 30 % up
+    TEST_ASSERT_TRUE(led_battery_hold(LED_BATTERY_HOLD, true, 100, 255, 0, 0, &r, &g, &b));
+    TEST_ASSERT_EQUAL_UINT8(255, r); TEST_ASSERT_EQUAL_UINT8(0, g); TEST_ASSERT_EQUAL_UINT8(0, b);
+    TEST_ASSERT_TRUE(led_battery_hold(LED_BATTERY_HOLD, true, LED_BATTERY_MIN_PCT, 0, 200, 0, &r, &g, &b));
+    TEST_ASSERT_EQUAL_UINT8(0, r); TEST_ASSERT_EQUAL_UINT8(255, g); TEST_ASSERT_EQUAL_UINT8(0, b);
+    TEST_ASSERT_TRUE(led_battery_hold(LED_BATTERY_HOLD, true, 50, 0x80, 0x7F, 0xFF, &r, &g, &b));   // >= 128 = on
+    TEST_ASSERT_EQUAL_UINT8(255, r); TEST_ASSERT_EQUAL_UINT8(0, g); TEST_ASSERT_EQUAL_UINT8(255, b);
+    // below the floor, an unknown level, or nothing to hold: dark
+    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, true, LED_BATTERY_MIN_PCT - 1, 255, 0, 0, &r, &g, &b));
+    TEST_ASSERT_EQUAL_UINT8(0, r | g | b);
+    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, false, 100, 255, 0, 0, &r, &g, &b));
+    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, true, 100, 0, 0, 0, &r, &g, &b));
+    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, true, 100, 10, 100, 127, &r, &g, &b));    // too dim on every channel
+    TEST_ASSERT_EQUAL_UINT8(0, r | g | b);
+}
+
+void test_led_battery_strings(void) {
+    TEST_ASSERT_EQUAL_STRING("off", led_battery_str(LED_BATTERY_OFF));
+    TEST_ASSERT_EQUAL_STRING("hold", led_battery_str(LED_BATTERY_HOLD));
+    TEST_ASSERT_EQUAL_STRING("off", led_battery_str(77));
+    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_HOLD, led_battery_parse("hold"));
+    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_OFF, led_battery_parse("off"));
+    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_OFF, led_battery_parse("always"));
+    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_OFF, led_battery_parse(NULL));
+}
+
+// The end-of-wake success blink: green unless the sign rule coloured the LED.
+void test_led_success_blink(void) {
+    TEST_ASSERT_TRUE(led_success_blink(LED_RULE_OFF, 0, 0, 0));
+    TEST_ASSERT_TRUE(led_success_blink(LED_RULE_OFF, 255, 0, 0));      // a payload colour: blink as before
+    TEST_ASSERT_TRUE(led_success_blink(LED_RULE_SIGN, 0, 0, 0));       // sign, but no direction yet
+    TEST_ASSERT_FALSE(led_success_blink(LED_RULE_SIGN, 255, 0, 0));    // red = down: the colour is the news
+    TEST_ASSERT_FALSE(led_success_blink(LED_RULE_SIGN, 0, 255, 0));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_led_battery_hold_rule);
+    RUN_TEST(test_led_battery_strings);
+    RUN_TEST(test_led_success_blink);
     RUN_TEST(test_dir_from_sign_prefix);
     RUN_TEST(test_dir_from_number_and_garbage);
     RUN_TEST(test_age_line_table);

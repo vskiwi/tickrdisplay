@@ -194,3 +194,25 @@ bool ticker_led_decide(uint8_t rule, bool has_led, uint8_t pr, uint8_t pg, uint8
     *b = 0;
     return true;
 }
+
+const char* led_battery_str(uint8_t v) {
+    return v == LED_BATTERY_HOLD ? "hold" : "off";
+}
+
+uint8_t led_battery_parse(const char* s) {
+    return (s && strcmp(s, "hold") == 0) ? LED_BATTERY_HOLD : LED_BATTERY_OFF;
+}
+
+bool led_battery_hold(uint8_t setting, bool batt_known, uint8_t batt_pct,
+                      uint8_t r, uint8_t g, uint8_t b, uint8_t* hr, uint8_t* hg, uint8_t* hb) {
+    *hr = *hg = *hb = 0;
+    if (setting != LED_BATTERY_HOLD || !batt_known || batt_pct < LED_BATTERY_MIN_PCT) return false;
+    *hr = r >= 128 ? 255 : 0;
+    *hg = g >= 128 ? 255 : 0;
+    *hb = b >= 128 ? 255 : 0;
+    return (*hr | *hg | *hb) != 0;
+}
+
+bool led_success_blink(uint8_t rule, uint8_t r, uint8_t g, uint8_t b) {
+    return !(rule == LED_RULE_SIGN && (r | g | b) != 0);
+}
