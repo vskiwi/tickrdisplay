@@ -8,6 +8,8 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-11
+
 ### Fixed
 
 - **Power**: a battery-powered device rebooted on every wake-up (a reboot
@@ -221,7 +223,8 @@ the day of the release; the development history before it was private.
   gate for the web UI; `TICKR_LOG_VERBOSE` build flag for the informational
   serial log.
 
-[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/vskiwi/tickrdisplay/releases/tag/v0.1.0
