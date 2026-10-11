@@ -767,11 +767,14 @@ static void draw_condition_card() {
             _state = SCREEN_BATTERY_EMPTY;
             break;
         default:   // CARD_POWER_BATTERY: the cell at its level; the second
-                   // line only when the mode switch follows (age_s = the interval)
+                   // line only when the mode switch follows (age_s = the
+                   // interval), or the address during the settings window
             draw_battery(cx - 44, 8, 80, 40, 4, _status.batt_known ? (int)_status.batt_pct : -1,
                          device_battery_low(_status.power, _status.batt_known, _status.batt_pct));
             big = UI_POWER_BATTERY;
-            if (_card_age_s && _card_age_s != DS_AGE_UNKNOWN)
+            if (_card_age_s == DS_HINT_ADDRESS)
+                snprintf(small, sizeof(small), UI_URL_FMT, _status.ip);
+            else if (_card_age_s && _card_age_s != DS_AGE_UNKNOWN)
                 snprintf(small, sizeof(small), UI_POWER_BATTERY_HINT_FMT, (unsigned)_card_age_s);
             _state = SCREEN_POWER_BATTERY;
             break;

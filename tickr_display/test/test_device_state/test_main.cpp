@@ -4,6 +4,7 @@
 #include <unity.h>
 #include <string.h>
 #include "logic/device_state.h"
+#include "logic/recovery_counter.h"   // recovery_reset_is_cold(): the settings window's input
 #include "logic/ui_strings.h"
 
 // A timeline: one poll per second with the inputs of `in` (now_ms advances).
@@ -590,6 +591,26 @@ void test_offline_age_line_minutes_hours_unknown() {
     TEST_ASSERT_TRUE(strlen("last update 59 min ago") <= 22);
 }
 
+// Settings window after the power switch: a cold reset on battery with a
+// source - never after a software restart / wake / crash (not cold), never
+// on USB (awake anyway), never without a source (WAITING stays awake
+// anyway), never on the boot that completes a recovery series.
+void test_setup_window_only_after_a_cold_battery_boot_with_a_source() {
+    TEST_ASSERT_TRUE(device_setup_window_due(true, true, true, false));
+    TEST_ASSERT_FALSE(device_setup_window_due(false, true, true, false));   // SW restart (the window's own end), deep-sleep wake, crash
+    TEST_ASSERT_FALSE(device_setup_window_due(true, false, true, false));   // USB
+    TEST_ASSERT_FALSE(device_setup_window_due(true, true, false, false));   // no source
+    TEST_ASSERT_FALSE(device_setup_window_due(true, true, true, true));     // recovery series complete
+    TEST_ASSERT_EQUAL_UINT32(180000u, DS_SETUP_WINDOW_MS);
+    // the recovery counter's notion of a cold reset is the rule's input
+    TEST_ASSERT_TRUE(recovery_reset_is_cold(RECOVERY_RST_POWERON));
+    TEST_ASSERT_TRUE(recovery_reset_is_cold(RECOVERY_RST_EXT));
+    TEST_ASSERT_TRUE(recovery_reset_is_cold(RECOVERY_RST_BROWNOUT));   // the switch often reports as one
+    TEST_ASSERT_FALSE(recovery_reset_is_cold(RECOVERY_RST_SW));
+    TEST_ASSERT_FALSE(recovery_reset_is_cold(RECOVERY_RST_DEEPSLEEP));
+    TEST_ASSERT_FALSE(recovery_reset_is_cold(RECOVERY_RST_CRASH));
+}
+
 void test_stale_is_three_intervals_at_least_ten_minutes() {
     TEST_ASSERT_EQUAL_UINT32(DS_T_STALE_MIN_MS, device_stale_ms(0));
     TEST_ASSERT_EQUAL_UINT32(DS_T_STALE_MIN_MS, device_stale_ms(1));
@@ -656,6 +677,7 @@ int runUnityTests() {
     RUN_TEST(test_power_switch_names);
     RUN_TEST(test_offline_card_on_second_failed_wake_then_every_fourth);
     RUN_TEST(test_offline_age_line_minutes_hours_unknown);
+    RUN_TEST(test_setup_window_only_after_a_cold_battery_boot_with_a_source);
     RUN_TEST(test_stale_is_three_intervals_at_least_ten_minutes);
     RUN_TEST(test_card_and_state_names);
     return UNITY_END();

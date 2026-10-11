@@ -75,6 +75,11 @@
 // on failure DS_OFFLINE_FAIL_FIRST, then every DS_OFFLINE_FAIL_EVERY-th.
 #define DS_OFFLINE_FAIL_FIRST       2u
 #define DS_OFFLINE_FAIL_EVERY       4u
+// Settings window (docs/DEVICE_UI.md "Power-mode switch"): a battery device
+// started with the power switch stays awake this long - web UI reachable,
+// the ON BATTERY card with its address on the panel - then restarts into
+// the battery flow.
+#define DS_SETUP_WINDOW_MS          180000u   // 3 min
 
 // What interrupts the base frame (content or WAITING). Priority as in docs/DEVICE_UI.md "State machine":
 // a higher card wins the panel; a transitional card that becomes due under
@@ -186,7 +191,18 @@ bool device_offline_card_due(uint32_t fail_count);
 // "last update N min ago" / "N h ago" for the OFFLINE card's second line;
 // age_s = DS_AGE_UNKNOWN (no content shown yet) -> "" (line omitted).
 #define DS_AGE_UNKNOWN 0xFFFFFFFFu
+// For CARD_POWER_BATTERY: the second line is the device's address
+// (settings window) instead of "updates every N min".
+#define DS_HINT_ADDRESS 0xFFFFFFFEu
 void device_offline_age_line(uint32_t age_s, char* buf, size_t len);
+
+// Settings window after the power switch: a boot on battery whose reset
+// is a cold one (power-on / EN pin / brownout - what the recovery counter
+// counts as the user at the switch), with a source to fetch and no
+// completed recovery series. Never after a software restart (OTA, the
+// power-mode restart, the portal timeout), a deep-sleep wake or a crash,
+// and never without a source - that device stays awake anyway (WAITING).
+bool device_setup_window_due(bool cold_reset, bool battery, bool has_source, bool recovery);
 
 // T_stale for a refresh interval in minutes (0 = unknown -> the minimum).
 uint32_t device_stale_ms(uint32_t interval_min);

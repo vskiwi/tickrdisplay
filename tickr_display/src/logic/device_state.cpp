@@ -32,6 +32,10 @@ void device_offline_age_line(uint32_t age_s, char* buf, size_t len) {
     else snprintf(buf, len, UI_OFFLINE_AGE_H_FMT, (unsigned)(min / 60u));
 }
 
+bool device_setup_window_due(bool cold_reset, bool battery, bool has_source, bool recovery) {
+    return cold_reset && battery && has_source && !recovery;
+}
+
 uint32_t device_stale_ms(uint32_t interval_min) {
     uint32_t ms = interval_min * 3u * 60000u;
     return ms > DS_T_STALE_MIN_MS ? ms : DS_T_STALE_MIN_MS;

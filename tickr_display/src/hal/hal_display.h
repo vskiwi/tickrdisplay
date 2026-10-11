@@ -74,7 +74,8 @@ void display_clear_content();
 // DS_AGE_UNKNOWN = no age line. Ignored while content is stored. For
 // CARD_POWER_BATTERY it is the refresh interval in minutes of the battery
 // flow the device is about to restart into ("updates every N min"; 0 or
-// DS_AGE_UNKNOWN = no second line).
+// DS_AGE_UNKNOWN = no second line; DS_HINT_ADDRESS = the device's address,
+// the settings window).
 void display_set_card(ScreenCard card, uint32_t age_s);
 ScreenCard display_card();
 // The kind of frame on the panel and the number of content frames drawn on
