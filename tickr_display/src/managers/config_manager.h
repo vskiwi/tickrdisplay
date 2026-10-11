@@ -19,8 +19,11 @@
 //    array `tickers` (objects with the same tk_* keys; row 0 stays in the flat tk_*
 //    keys) - docs/TICKERS.md "Several tickers on one panel: the 2x2 grid".
 //    Migration: a file without tk_view / tk_n loads as `single`, one source.
+// 10: led_battery (off | hold) - the LED through deep sleep (docs/DEVICE_UI.md "LED and sound");
+//    adc_cell_num/den 0/0 = auto (the board's divider, docs/HARDWARE.md "Power sensing").
+//    Migration: the old explicit default 189/100 is read as auto; any other value is kept.
 // Missing fields always fall back to their defaults, so older files load fine.
-#define CONFIG_SCHEMA_VERSION      9
+#define CONFIG_SCHEMA_VERSION      10
 #define CONFIG_REFRESH_MIN_MINUTES 1
 #define CONFIG_REFRESH_MAX_MINUTES 1440   // 24 h
 #define CONFIG_NAME_LEN            32
@@ -62,13 +65,14 @@ struct AppConfig {
     uint8_t power_source = 0;
 
     // --- schema_version >= 6: cell divider --------------------------------
-    // GPIO 32 (cell) divider as num/den, calibrated pin mV -> cell mV
-    // (logic/battery.h CELL_DIVIDER_*_DEFAULT = 189/100, the stock-equivalent
-    // ratio; TODO(hw-verify) against a multimeter). Out-of-range values are
-    // replaced by the default on load (cell_divider_valid()). Reported as
-    // `cell_divider` in GET /api/power/raw, set through POST /config.
-    uint16_t adc_cell_num = 189;
-    uint16_t adc_cell_den = 100;
+    // GPIO 32 (cell) divider as num/den, calibrated pin mV -> cell mV. 0/0
+    // (CELL_DIVIDER_AUTO, the default since schema 10) = the board's value
+    // (logic/battery.h: rev A 189/100, rev B 200/100); a set value is a
+    // per-device calibration and wins. Out-of-range values are replaced by
+    // auto on load (cell_divider_valid()). Reported as `cell_divider` in
+    // GET /api/power/raw and /api/status (the effective one), set through POST /config.
+    uint16_t adc_cell_num = 0;
+    uint16_t adc_cell_den = 0;
 
     // --- schema_version >= 7: ticker look ----------------------------------
     // LED rule (logic/ticker.h LedRule): 0 = off - the payload's alert.led as
@@ -76,6 +80,12 @@ struct AppConfig {
     // the sign of `change`) when the payload carries no alert.led. Stored as
     // "off" | "sign"; `led_rule` in GET /api/config and POST /config.
     uint8_t led_rule = 0;
+    // --- schema_version >= 10: the LED through deep sleep ------------------
+    // logic/ticker.h LedBattery: 0 = off - the LED pins are held dark between
+    // wake-ups; 1 = hold - the base colour stays lit through the sleep while
+    // the level is >= LED_BATTERY_MIN_PCT. Stored as "off" | "hold";
+    // `led_battery` in GET /api/config and POST /config.
+    uint8_t led_battery = 0;
 
     // --- schema_version >= 8: content source -------------------------------
     // What the device shows content from (logic/source.h SourceKind): only

@@ -32,7 +32,7 @@ static int32_t  s_boot_diff_min = 0, s_boot_diff_max = 0;
 // and left to float (= network off on rev B, no function on rev A).
 static const gpio_num_t kHeldPins[] = {
     (gpio_num_t)PIN_EPD_PWR,     // HIGH = display power OFF
-    (gpio_num_t)PIN_LED_RED,     // HIGH = LED off (active LOW)
+    (gpio_num_t)PIN_LED_RED,     // HIGH = LED off (active LOW); LOW = held lit (led_battery = hold)
     (gpio_num_t)PIN_LED_GREEN,
     (gpio_num_t)PIN_LED_BLUE,
     (gpio_num_t)PIN_AMP_EN,      // LOW = amplifier off
@@ -63,14 +63,33 @@ bool power_sense_enabled() {
     return digitalRead(PIN_BAT_SENSE_EN) == HIGH;
 }
 
+// The colour the LED pins were held at through the last deep sleep
+// (docs/DEVICE_UI.md "LED and sound", `led_battery = hold`): magic in the top
+// byte, R / G / B as 0 or 255 below. RTC slow memory: valid after a
+// deep-sleep wake, reloaded (zero) by every other reset.
+#define LED_HELD_MAGIC 0x4C000000u
+RTC_DATA_ATTR static uint32_t s_rtc_led_held = 0;
+static uint8_t s_held_rgb[3] = { 0, 0, 0 };   // what this boot pre-loaded
+
+static void led_set_levels(uint8_t r, uint8_t g, uint8_t b) {   // active LOW
+    set_output(PIN_LED_RED, r ? LOW : HIGH);
+    set_output(PIN_LED_GREEN, g ? LOW : HIGH);
+    set_output(PIN_LED_BLUE, b ? LOW : HIGH);
+}
+
 void power_init() {
     // Pre-load the safe levels into the GPIO registers, then release the
     // deep-sleep holds so the pads switch from "held" straight to the same
-    // levels without glitching (EPD power stays off, LEDs stay off).
+    // levels without glitching (EPD power stays off; the LEDs stay at the
+    // colour the sleep held, or off).
+    if (esp_reset_reason() == ESP_RST_DEEPSLEEP && (s_rtc_led_held & 0xFF000000u) == LED_HELD_MAGIC) {
+        s_held_rgb[0] = (uint8_t)(s_rtc_led_held >> 16);
+        s_held_rgb[1] = (uint8_t)(s_rtc_led_held >> 8);
+        s_held_rgb[2] = (uint8_t)s_rtc_led_held;
+    }
+    s_rtc_led_held = 0;
     set_output(PIN_EPD_PWR, HIGH);
-    set_output(PIN_LED_RED, HIGH);
-    set_output(PIN_LED_GREEN, HIGH);
-    set_output(PIN_LED_BLUE, HIGH);
+    led_set_levels(s_held_rgb[0], s_held_rgb[1], s_held_rgb[2]);
     set_output(PIN_AMP_EN, LOW);
     gpio_deep_sleep_hold_dis();
     for (gpio_num_t p : kHeldPins) gpio_hold_dis(p);
@@ -115,12 +134,12 @@ bool power_battery_measurable() {
 }
 
 void power_set_cell_divider(uint16_t num, uint16_t den) {
-    if (!cell_divider_valid(num, den)) {
-        num = CELL_DIVIDER_NUM_DEFAULT;
-        den = CELL_DIVIDER_DEN_DEFAULT;
-    }
-    s_cell_num = num;
-    s_cell_den = den;
+    cell_divider_effective((uint8_t)s_board, num, den, &s_cell_num, &s_cell_den);
+}
+
+void power_get_cell_divider(uint16_t* num, uint16_t* den) {
+    if (num) *num = s_cell_num;
+    if (den) *den = s_cell_den;
 }
 
 uint32_t power_get_vsys_mv() {
@@ -284,14 +303,23 @@ void power_read_raw(PowerRaw* out) {
     }
 }
 
-void power_deep_sleep(uint64_t sleep_time_us) {
-    // LEDs: detach PWM so the pads are plain GPIO again, then drive OFF.
+void power_held_led(uint8_t* r, uint8_t* g, uint8_t* b) {
+    *r = s_held_rgb[0];
+    *g = s_held_rgb[1];
+    *b = s_held_rgb[2];
+}
+
+void power_deep_sleep(uint64_t sleep_time_us, uint8_t led_r, uint8_t led_g, uint8_t led_b) {
+    // LEDs: detach PWM so the pads are plain GPIO again, then drive the
+    // level the sleep keeps - off, or the full-on colour of `led_battery =
+    // hold` (no PWM in deep sleep); remembered for the next boot's pre-load.
     ledcDetachPin(PIN_LED_RED);
     ledcDetachPin(PIN_LED_GREEN);
     ledcDetachPin(PIN_LED_BLUE);
-    set_output(PIN_LED_RED, HIGH);
-    set_output(PIN_LED_GREEN, HIGH);
-    set_output(PIN_LED_BLUE, HIGH);
+    led_set_levels(led_r, led_g, led_b);
+    s_rtc_led_held = (led_r | led_g | led_b)
+        ? LED_HELD_MAGIC | ((uint32_t)(led_r ? 255 : 0) << 16) | ((uint32_t)(led_g ? 255 : 0) << 8) | (led_b ? 255 : 0)
+        : 0;
 
     // Audio: amplifier standby, DAC off.
     dacDisable(PIN_AUDIO_DAC);
@@ -306,7 +334,7 @@ void power_deep_sleep(uint64_t sleep_time_us) {
 
     // Digital pads lose their state in deep sleep unless held; without this
     // the active-LOW LEDs could float on and the display rail could float.
-    // TODO(hw-verify): measure sleep current and check LEDs stay dark.
+    // The same hold keeps a lit LED lit. TODO(hw-verify): sleep current.
     for (gpio_num_t p : kHeldPins) gpio_hold_en(p);
     gpio_deep_sleep_hold_en();
 

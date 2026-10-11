@@ -1,7 +1,9 @@
 #pragma once
 #include <Arduino.h>
 
-void indication_init();
+// `r g b` = the base colour to start with: what the pads carry at boot
+// (power_held_led() - the colour a deep sleep held, else 0/0/0 = off).
+void indication_init(uint8_t r, uint8_t g, uint8_t b);
 // Base colour - the user's (payload alert.led, /api/test/led). Stored, and
 // written to the LEDs unless an overlay is active (docs/DEVICE_UI.md "LED and sound").
 void indication_led(bool r, bool g, bool b);

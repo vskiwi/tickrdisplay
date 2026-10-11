@@ -33,9 +33,18 @@ bool power_battery_measurable();
 void power_sense_enable(bool on);
 bool power_sense_enabled();              // digitalRead() of the pad
 
-// Cell divider (AppConfig::adc_cell_num/den), applied by main.cpp before
-// the first reading; falls back to the default when invalid.
+// Cell divider (AppConfig::adc_cell_num/den), applied by main.cpp after
+// power_init() (the board profile) and before the first reading: 0/0 or an
+// invalid pair = the board's divider (logic/battery.h cell_divider_effective()).
 void power_set_cell_divider(uint16_t num, uint16_t den);
+// The divider in effect (`cell_divider` in /api/status and /api/power/raw).
+void power_get_cell_divider(uint16_t* num, uint16_t* den);
+
+// The colour the LED pins were pre-loaded with at this boot: the one the
+// previous deep sleep held (led_battery = hold, docs/DEVICE_UI.md "LED and
+// sound"), 0/0/0 after any other reset. main.cpp hands it to
+// indication_init() so the bar does not blink at a wake-up.
+void power_held_led(uint8_t* r, uint8_t* g, uint8_t* b);
 
 // Configured override (AppConfig::power_source), applied by main.cpp before
 // the first power_get_source(). Default POWER_MODE_AUTO.
@@ -119,7 +128,10 @@ struct PowerRaw {
 };
 void power_read_raw(PowerRaw* out);
 
-// Powers down peripherals (LEDs, amplifier), drops the sense enable,
-// latches safe GPIO levels and enters deep sleep. The display must already
-// be put to sleep by the caller (display_prepare_sleep()). Never returns.
-void power_deep_sleep(uint64_t sleep_time_us);
+// Powers down peripherals (amplifier), drops the sense enable, latches the
+// GPIO levels and enters deep sleep. The LED pins are held at led_r/g/b
+// (each 0 = off, else on - full on, deep sleep has no PWM): 0/0/0 = dark,
+// the usual; a colour = `led_battery = hold` (led_battery_hold()). The
+// display must already be put to sleep by the caller
+// (display_prepare_sleep()). Never returns.
+void power_deep_sleep(uint64_t sleep_time_us, uint8_t led_r, uint8_t led_g, uint8_t led_b);

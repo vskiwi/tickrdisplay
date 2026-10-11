@@ -349,9 +349,10 @@ void ConnectivityManager::handle_config_api(AsyncWebServerRequest* request) {
     doc["ota_password_set"] = strlen(_config.ota_password) > 0;
     doc["group_set"]        = pairing_has_group();     // the credentials themselves never leave the device
     doc["arduino_ota_build"] = ota_arduino_built();   // UI hides the OTA password field otherwise
-    doc["adc_cell_num"]     = _config.adc_cell_num;   // cell divider (docs/HARDWARE.md "Power sensing")
+    doc["adc_cell_num"]     = _config.adc_cell_num;   // cell divider, 0/0 = auto (docs/HARDWARE.md "Power sensing")
     doc["adc_cell_den"]     = _config.adc_cell_den;
     doc["led_rule"]         = led_rule_str(_config.led_rule);   // "off" | "sign" (docs/TICKERS.md "What the screen shows")
+    doc["led_battery"]      = led_battery_str(_config.led_battery);   // "off" | "hold" (docs/DEVICE_UI.md "LED and sound")
     // Content source (schema 8, docs/TICKERS.md "Presets"): the editor pre-fills its Ticker form from these.
     // The grid (schema 9): tk_view, tk_n and rows 1..3 as tk1_* ... tk3_* (flat, like the POST fields).
     doc["source_kind"]      = source_kind_str(_config.source_kind);
@@ -494,14 +495,16 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
             nc.refresh_interval_min = (int)iv;
         }
     }
-    // Cell divider (schema 6): both fields together, validated as a ratio.
+    // Cell divider (schema 6): both fields together, validated as a ratio;
+    // 0/0 = auto, the board's divider (docs/HARDWARE.md "Power sensing").
     String vd;
     bool has_cn = getp("adc_cell_num", v), has_cd = getp("adc_cell_den", vd);
     if (has_cn || has_cd) {
         long cn = has_cn ? v.toInt() : nc.adc_cell_num;
         long cd = has_cd ? vd.toInt() : nc.adc_cell_den;
-        if (cn < 0 || cn > 65535 || cd < 0 || cd > 65535 || !cell_divider_valid((uint16_t)cn, (uint16_t)cd)) {
-            err += "adc_cell_num/den: ratio must be 1.0..4.0, den 1..1000. ";
+        bool is_auto = cn == 0 && cd == 0;
+        if (!is_auto && (cn < 0 || cn > 65535 || cd < 0 || cd > 65535 || !cell_divider_valid((uint16_t)cn, (uint16_t)cd))) {
+            err += "adc_cell_num/den: ratio must be 1.0..4.0, den 1..1000 (0/0 = auto). ";
         } else {
             nc.adc_cell_num = (uint16_t)cn;
             nc.adc_cell_den = (uint16_t)cd;
@@ -510,6 +513,10 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
     if (getp("led_rule", v)) {
         if (v == "off" || v == "sign") nc.led_rule = led_rule_parse(v.c_str());
         else err += "led_rule: must be off or sign. ";
+    }
+    if (getp("led_battery", v)) {
+        if (v == "off" || v == "hold") nc.led_battery = led_battery_parse(v.c_str());
+        else err += "led_battery: must be off or hold. ";
     }
 
     // Content source (schema 8, docs/TICKERS.md "Presets"). The editor posts only the
@@ -644,6 +651,12 @@ void ConnectivityManager::handle_status(AsyncWebServerRequest* request) {
         doc["vsys_v"] = nullptr;
         doc["vin_v"] = nullptr;
     }
+    // The cell divider in effect ("200/100"): the board's, or the configured one.
+    uint16_t cdn, cdd;
+    power_get_cell_divider(&cdn, &cdd);
+    char cdiv[12];
+    snprintf(cdiv, sizeof(cdiv), "%u/%u", (unsigned)cdn, (unsigned)cdd);
+    doc["cell_divider"] = cdiv;
     doc["pull_https"] = strncasecmp(_config.pull_url, "https://", 8) == 0;
     doc["tls_ca"] = config_ca_exists();
     doc["mqtt_enabled"] = strlen(_config.mqtt_server) > 0;

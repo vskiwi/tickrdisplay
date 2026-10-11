@@ -124,11 +124,13 @@ bool config_load(AppConfig& config) {
     config.group_epoch = (uint16_t)(doc["group_epoch"] | 0);
     // schema 5
     config.power_source = config_power_source_parse(doc["power_source"] | "auto");
-    // schema 6
-    int cn = doc["adc_cell_num"] | (int)CELL_DIVIDER_NUM_DEFAULT;
-    int cd = doc["adc_cell_den"] | (int)CELL_DIVIDER_DEN_DEFAULT;
+    // schema 6 (absent = auto; schema 10 reads the old explicit default as auto)
+    int cn = doc["adc_cell_num"].as<int>();   // absent -> 0 = CELL_DIVIDER_AUTO
+    int cd = doc["adc_cell_den"].as<int>();
     // schema 7
     config.led_rule = led_rule_parse(doc["led_rule"] | "off");
+    // schema 10
+    config.led_battery = led_battery_parse(doc["led_battery"] | "off");
     // schema 8: the content source. Older files: pull_url set -> url, else none.
     if (doc.containsKey("source_kind")) config.source_kind = source_kind_parse(doc["source_kind"] | "none");
     else config.source_kind = source_pull_kind(SRC_KIND_NONE, config.pull_url[0] != '\0');
@@ -146,11 +148,12 @@ bool config_load(AppConfig& config) {
 
     // Sanitise values that may come from an older / hand-edited file.
     if (cn < 0 || cn > 65535 || cd < 0 || cd > 65535 || !cell_divider_valid((uint16_t)cn, (uint16_t)cd)) {
-        cn = CELL_DIVIDER_NUM_DEFAULT;
-        cd = CELL_DIVIDER_DEN_DEFAULT;
+        cn = CELL_DIVIDER_AUTO;
+        cd = CELL_DIVIDER_AUTO;
     }
     config.adc_cell_num = (uint16_t)cn;
     config.adc_cell_den = (uint16_t)cd;
+    if (schema < 10) cell_divider_migrate(&config.adc_cell_num, &config.adc_cell_den);
     if (config.mqtt_port < 1 || config.mqtt_port > 65535) config.mqtt_port = 1883;
     if (config.refresh_interval_min < CONFIG_REFRESH_MIN_MINUTES ||
         config.refresh_interval_min > CONFIG_REFRESH_MAX_MINUTES) {
@@ -191,6 +194,7 @@ bool config_save(const AppConfig& config) {
     doc["adc_cell_num"] = config.adc_cell_num;
     doc["adc_cell_den"] = config.adc_cell_den;
     doc["led_rule"] = led_rule_str(config.led_rule);
+    doc["led_battery"] = led_battery_str(config.led_battery);
     doc["source_kind"] = source_kind_str(config.source_kind);
     spec_save(doc.as<JsonObject>(), config.ticker);
     doc["tk_api_key"] = config.tk_api_key;

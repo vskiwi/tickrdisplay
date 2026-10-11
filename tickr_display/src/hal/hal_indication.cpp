@@ -79,19 +79,21 @@ void indication_loop() {
     refresh();
 }
 
-void indication_init() {
-    // Setup PWM channels
+void indication_init(uint8_t r, uint8_t g, uint8_t b) {
+    // The PWM channels start at the colour the pads already carry (the one
+    // the deep sleep held, else off), so taking the pins over does not blink.
+    _current_r = r;
+    _current_g = g;
+    _current_b = b;
     ledcSetup(LED_PWM_CHAN_R, LED_PWM_FREQ, LED_PWM_RES);
     ledcSetup(LED_PWM_CHAN_G, LED_PWM_FREQ, LED_PWM_RES);
     ledcSetup(LED_PWM_CHAN_B, LED_PWM_FREQ, LED_PWM_RES);
+    write_rgb(r, g, b);   // duty before the pins are attached: no off glitch
 
     // Attach pins
     ledcAttachPin(PIN_LED_RED, LED_PWM_CHAN_R);
     ledcAttachPin(PIN_LED_GREEN, LED_PWM_CHAN_G);
     ledcAttachPin(PIN_LED_BLUE, LED_PWM_CHAN_B);
-    
-    // LEDs OFF (Active LOW -> HIGH = OFF)
-    indication_led_rgb(0, 0, 0);
 
     pinMode(PIN_AMP_EN, OUTPUT);
     digitalWrite(PIN_AMP_EN, LOW); // Amp OFF

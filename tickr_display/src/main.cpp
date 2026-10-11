@@ -22,6 +22,7 @@
 #include "logic/renderer.h"
 #include "logic/command_queue.h"
 #include "logic/battery.h"
+#include "logic/ticker.h"   // led_battery_hold(), led_success_blink()
 #include "logic/status_policy.h"
 #include "logic/device_state.h"
 #include "logic/pull_scheduler.h"
@@ -68,6 +69,18 @@ RTC_DATA_ATTR static uint8_t  rtc_waiting_shown = 0;
 #define POWER_RESTART_MAGIC 0x50575200u            // "PWR" + has_content bit
 RTC_DATA_ATTR static uint32_t rtc_power_restart = 0;
 static bool power_switch_locked = false;           // the last switch landed back in USB mode
+// Battery level across wake-ups (docs/HARDWARE.md "Power sensing"): the
+// percentage the last frame carried, so the 5 % display hysteresis of
+// collect_status() works between sleeps too (0xFF = none this discharge).
+RTC_DATA_ATTR static uint8_t  rtc_batt_pct_shown = 0xFF;
+// Battery flow: the cell read once before Wi-Fi comes up (the radio's
+// current sags the reading by tens of millivolts = several percent near the
+// top of the curve); 0 = read live (USB, or the awake battery device).
+static uint32_t battery_cell_mv_latched = 0;
+// Settings window (docs/DEVICE_UI.md "Power-mode switch"): a battery device
+// started with the power switch runs the USB flow until this uptime, then
+// restarts into the battery flow. 0 = no window.
+static uint32_t setup_window_until = 0;
 
 static DisplayStatus shown_status;   // badge snapshot the base frame carries
 static PullScheduler pull_sched;     // USB-mode pull timer (logic/pull_scheduler.h)
@@ -158,15 +171,20 @@ static DisplayStatus collect_status(const DisplayStatus* prev) {
     s.batt_known = power_battery_measurable();   // false on board ? only: outline without a percentage
     if (s.usb) {
         s.batt_pct = 100; // the bolt is drawn; the charging cell's level is not shown
+        rtc_batt_pct_shown = 0xFF;
     } else if (!s.batt_known) {
         s.batt_pct = 0;
     } else {
-        uint8_t raw = battery_mv_to_percent(power_get_battery_mv());
-        if (prev && !prev->usb && !battery_level_changed(prev->batt_pct, raw, BATTERY_DISPLAY_STEP_PCT)) {
-            s.batt_pct = prev->batt_pct;
+        uint8_t raw = battery_mv_to_percent(battery_cell_mv_latched ? battery_cell_mv_latched : power_get_battery_mv());
+        // The hysteresis step: the previous snapshot, or on the battery flow
+        // the level the last wake drew (RTC memory).
+        uint8_t prev_pct = prev && !prev->usb ? prev->batt_pct : rtc_batt_pct_shown;
+        if (prev_pct != 0xFF && !battery_level_changed(prev_pct, raw, BATTERY_DISPLAY_STEP_PCT)) {
+            s.batt_pct = prev_pct;
         } else {
             s.batt_pct = battery_percent_quantize(raw, BATTERY_DISPLAY_STEP_PCT);
         }
+        rtc_batt_pct_shown = s.batt_pct;
     }
     return s;
 }
@@ -176,27 +194,47 @@ static void refresh_shown_status() {
     display_set_status(shown_status, false);
 }
 
+// Deep sleep with the LED pins held dark - or, with `led_battery = hold` and
+// the level at or above LED_BATTERY_MIN_PCT, at the base colour (full on per
+// channel; docs/DEVICE_UI.md "LED and sound").
 static void battery_sleep_minutes(uint32_t minutes) {
     Serial.printf("Entering Deep Sleep for %u minutes (fails=%u)\n", minutes, rtc_fail_count);
     rtc_slept_min += minutes;
+    uint8_t r, g, b, hr, hg, hb;
+    indication_get_rgb(&r, &g, &b);
+    if (led_battery_hold(cm.getConfig().led_battery, shown_status.batt_known, shown_status.batt_pct, r, g, b, &hr, &hg, &hb))
+        Serial.printf("LED: held %u/%u/%u through the sleep (%u%%)\n", hr, hg, hb, shown_status.batt_pct);
     display_prepare_sleep();
-    power_deep_sleep((uint64_t)minutes * 60ULL * 1000000ULL);
+    power_deep_sleep((uint64_t)minutes * 60ULL * 1000000ULL, hr, hg, hb);
 }
 
 // A failed wake-up (docs/DEVICE_UI.md "E-ink refresh rules"): no frame on the
 // first miss (a router rebooting is common and the panel keeps the last
 // content), the OFFLINE card with the age of the shown data on the 2nd,
-// then every 4th; the LED blinks red either way. One frame per wake at most.
+// then every 4th; the LED blinks red either way and returns to the base
+// colour (the one a hold keeps). One frame per wake at most.
 static void battery_fail(uint32_t interval_min) {
     rtc_fail_count++;
     if (device_offline_card_due(rtc_fail_count)) {
         display_set_card(CARD_OFFLINE, rtc_content_shown ? rtc_slept_min * 60u : DS_AGE_UNKNOWN);
         display_show_base();
     }
-    indication_led(true, false, false);
-    delay(300);
-    indication_led(false, false, false);
+    indication_flash(255, 0, 0, 300);
+    delay(310);
+    indication_loop();   // the flash ends: the base colour is back on the pads
     battery_sleep_minutes(backoff_minutes(interval_min, rtc_fail_count, BACKOFF_CAP_MIN));
+}
+
+// The end-of-wake blink after a successful fetch: green 300 ms, then the
+// base colour - unless the sign rule coloured the LED, in which case that
+// colour is the news and stays (docs/DEVICE_UI.md "LED and sound").
+static void battery_success_blink() {
+    uint8_t r, g, b;
+    indication_get_rgb(&r, &g, &b);
+    if (!led_success_blink(renderer_led_rule(), r, g, b)) return;
+    indication_flash(0, 255, 0, 300);
+    delay(310);
+    indication_loop();
 }
 
 void setup() {
@@ -240,14 +278,19 @@ void setup() {
         rtc_content_shown = restart_had_content ? 1 : 0;
         rtc_relay_ip = 0;
         rtc_waiting_shown = 0;
+        rtc_batt_pct_shown = 0xFF;
     }
     rtc_wake_count++;
     Serial.printf("Boot: %s, wake #%u\n", woke ? "deep-sleep wake" : power_restart ? "power-mode restart" : "cold", rtc_wake_count);
     // Power-cycle recovery counter (NVS): decided before anything can block.
-    bool enter_recovery = recovery_boot(recovery_reset_kind(esp_reset_reason()));
+    RecoveryResetKind reset_kind = recovery_reset_kind(esp_reset_reason());
+    bool enter_recovery = recovery_boot(reset_kind);
     log_flash_info();
 
-    indication_init();
+    // The LEDs start at the colour the deep sleep held (led_battery = hold), else off.
+    uint8_t held_r, held_g, held_b;
+    power_held_led(&held_r, &held_g, &held_b);
+    indication_init(held_r, held_g, held_b);
 
     // The power-source override (AppConfig::power_source) and the cell
     // divider must be known before the USB/battery decision below, i.e.
@@ -259,6 +302,7 @@ void setup() {
     // chain of the firmware) runs from setup() below, and a 2 KB AppConfig
     // on this frame left it short of stack (stack canary -> panic -> reboot
     // on every wake-up).
+    bool early_has_source = false;   // a Pull URL or the ticker source (the settings window needs one)
     {
         config_init();
         AppConfig* early = new AppConfig();
@@ -266,12 +310,16 @@ void setup() {
             config_load(*early);
             power_set_mode((PowerMode)early->power_source);
             power_set_cell_divider(early->adc_cell_num, early->adc_cell_den);
+            early_has_source = source_pull_kind(early->source_kind, early->pull_url[0] != '\0') != SRC_KIND_NONE;
             delete early;
         }
         relay_begin();   // /relay, /peers directories + the nonce store
     }
 
     PowerSource pwr = power_get_source();
+    // Battery: the cell is read here, before Wi-Fi draws current, and this
+    // one reading is the level of the whole wake (collect_status()).
+    if (pwr == POWER_BATTERY && power_battery_measurable()) battery_cell_mv_latched = power_get_battery_mv();
     Serial.printf("Power Source: %s (board %s, mode %s, sense %d), cell=%u mV, rail=%u mV\n",
                   power_source_label(), power_board_str(), config_power_source_str((uint8_t)power_get_mode()),
                   (int)power_get_sense(), power_get_battery_mv(), power_get_vin_mv());
@@ -309,6 +357,13 @@ void setup() {
     // series has started (position >= 2). Recovery itself is USB-only - the
     // battery flow would deep-sleep under the AP.
     bool battery = (pwr == POWER_BATTERY);
+    // Settings window (docs/DEVICE_UI.md "Power-mode switch"): switched on
+    // with the slider on battery (a cold reset) with a source to fetch - the
+    // device runs the USB flow for DS_SETUP_WINDOW_MS (web UI reachable, the
+    // ON BATTERY card with its address), then restarts into the battery flow.
+    // Not after a software restart (that is how the window ends), a wake-up
+    // or a crash, and not on the boot that completes a recovery series.
+    bool setup_window = device_setup_window_due(recovery_reset_is_cold(reset_kind), battery, early_has_source, enter_recovery);
     uint8_t pos = recovery_position();
     BootFrame frame = BOOT_FRAME_SPLASH;
     bool draw_frame = false;
@@ -344,6 +399,15 @@ void setup() {
     // returns false on failure.
     bool connected = cm.init(onData, battery);
     refresh_shown_status();
+    // The window needs the link; without it the wake fails like any other.
+    if (setup_window && connected) {
+        setup_window_until = millis() + DS_SETUP_WINDOW_MS;
+        if (!setup_window_until) setup_window_until = 1;
+        battery_cell_mv_latched = 0;          // awake for minutes: poll the cell live
+        Serial.printf("Power: settings window - awake for %u s at %s\n", (unsigned)(DS_SETUP_WINDOW_MS / 1000u), shown_status.ip);
+    } else {
+        setup_window = false;
+    }
     // T_stale of the ticker's age line: 3 x the refresh interval, min 10 min.
     display_set_stale_ms(device_stale_ms((uint32_t)cm.getConfig().refresh_interval_min));
     screen_api_set_source(cm.pullSourceStr(), cm.tickerSymbol());   // /api/screen/state source / symbol
@@ -359,7 +423,7 @@ void setup() {
     esp_task_wdt_add(NULL);
     esp_task_wdt_reset();
 
-    if (battery) {
+    if (battery && !setup_window) {
         LOGVLN("Running in Battery Mode");
         // The refresh interval (default 1 hour), raised to 15 min while the 2x2
         // grid fetches up to four sources per wake (docs/TICKERS.md "Several
@@ -392,9 +456,7 @@ void setup() {
             LOGVLN("Data fetched successfully");
             rtc_slept_min = 0;          // the age line of a later OFFLINE card counts from here
             rtc_content_shown = 1;
-            indication_led(false, true, false);
-            delay(300);
-            indication_led(false, false, false);
+            battery_success_blink();
             battery_sleep_minutes(interval);
         } else if (src == RELAY_SRC_RELAY) {
             // Group member without a Pull URL (docs/MULTI_DEVICE.md "Relay for sleeping members"): probe for a
@@ -406,9 +468,7 @@ void setup() {
             if (rc == RELAY_RC_SHOWN) {
                 rtc_slept_min = 0;
                 rtc_content_shown = 1;
-                indication_led(false, true, false);
-                delay(300);
-                indication_led(false, false, false);
+                battery_success_blink();
             } else if (!rtc_content_shown && !rtc_waiting_shown) {
                 display_show_base();    // nothing parked yet: the WAITING card once per discharge
                 rtc_waiting_shown = 1;
@@ -418,11 +478,12 @@ void setup() {
             // WAITING card ("Ready - choose content at http://ip/"): the
             // device stays awake here, so the address works.
             Serial.println("No Pull URL configured - staying awake for config");
+            battery_cell_mv_latched = 0;   // awake: poll the cell live
             display_show_base();
             // Treat as USB mode to allow configuration
         }
     } else {
-        LOGVLN("Running in USB Mode");
+        LOGVLN(setup_window ? "Running the settings window" : "Running in USB Mode");
         if (!connected) {
             // Portal timed out on USB power: just retry, we are not draining a cell.
             Serial.println("WiFi not connected - restarting");
@@ -435,8 +496,14 @@ void setup() {
         // the battery -> USB mode switch (docs/DEVICE_UI.md "Power-mode switch"): the panel
         // keeps the last battery frame and the scheduled pull (3 s) draws
         // the content with the bolt - one frame, no WAITING card, no ON-USB card.
+        // The settings window draws the ON BATTERY card with the address
+        // instead and holds the first pull: the card stays readable for the
+        // whole window; a source saved meanwhile fetches at once.
         bool hasUrl = cm.pullConfigured();
-        if (recovery_pending()) {
+        if (setup_window) {
+            display_set_card(CARD_POWER_BATTERY, DS_HINT_ADDRESS);
+            display_show_base();
+        } else if (recovery_pending()) {
             recovery_start_if_pending();
         } else if (woke && hasUrl) {
             LOGVLN("Power: woke on USB - the next pull draws the content");
@@ -452,7 +519,7 @@ void setup() {
         // of only on battery wake-ups. Disabled without a URL; POST /config
         // arms it (pullReconfigured() in loop()).
         pull_sched_start(&pull_sched, millis(), (uint32_t)cm.getConfig().refresh_interval_min,
-                         hasUrl, esp_random());
+                         hasUrl && !setup_window, esp_random());
 
         // LAN push-OTA (ArduinoOTA, port 3232): USB power only - on battery the
         // device deep-sleeps right after the pull and must not keep a listener
@@ -536,6 +603,9 @@ static bool device_state_tick(const DisplayStatus& cur) {
     }
     if (out.power_restart) power_mode_restart();   // never returns
 
+    // Settings window: the machine knows no card, but the ON BATTERY card
+    // with the address stays up until content replaces it or the window ends.
+    if (setup_window_until && out.card == CARD_NONE && display_card() == CARD_POWER_BATTERY) return false;
     if (out.card == display_card()) return false;
     Serial.printf("Card: %s -> %s\n", screen_card_str(display_card()), screen_card_str(out.card));
     // The ON-BATTERY card promises "updates every N min" only when the
@@ -648,6 +718,21 @@ void loop() {
         // folded into it (never two refreshes in one second).
         bool drew = device_state_tick(cur);
         if (act == BADGE_REFRESH && !drew) display_refresh_badges();
+
+        // Settings window over: restart into the battery flow - unless USB
+        // showed up meanwhile (then this is simply a USB device), or a
+        // flash / service frame / recovery is in progress (checked again
+        // next second).
+        if (setup_window_until && (int32_t)(millis() - setup_window_until) >= 0) {
+            if (cur.power != BADGE_POWER_BATTERY) {
+                Serial.println("Power: settings window - USB found, staying awake");
+                setup_window_until = 0;
+            } else if (!(ota_update_in_progress() || ota_arduino_in_progress() || display_overlay_active() ||
+                         display_temp_active() || recovery_active() || wifi_portal_active())) {
+                Serial.println("Power: settings window over");
+                power_mode_restart();   // never returns
+            }
+        }
     }
 
     delay(10);
