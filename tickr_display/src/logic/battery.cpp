@@ -3,9 +3,10 @@
 namespace {
 struct OcvPoint { uint16_t mv; uint8_t pct; };
 
-// Typical 1S Li-Ion/LiPo resting voltage curve (descending).
+// Typical 1S Li-Ion/LiPo resting voltage curve (descending). Full at
+// 4.15 V: a charger terminates at 4.20 V and the cell relaxes below it.
 const OcvPoint kOcvTable[] = {
-    {4200, 100}, {4100, 90}, {4000, 78}, {3900, 62}, {3800, 45},
+    {4150, 100}, {4100, 94}, {4000, 78}, {3900, 62}, {3800, 45},
     {3700, 25},  {3600, 12}, {3500, 5},  {3400, 2},  {3300, 0},
 };
 const int kOcvCount = sizeof(kOcvTable) / sizeof(kOcvTable[0]);
@@ -55,6 +56,30 @@ uint32_t cell_mv_from_pin(uint32_t pin_mv, uint16_t num, uint16_t den) {
 bool cell_divider_valid(uint16_t num, uint16_t den) {
     if (den == 0 || den > 1000) return false;
     return num >= den && num <= 4u * den;   // ratio 1.0 .. 4.0
+}
+
+bool cell_divider_is_auto(uint16_t num, uint16_t den) {
+    return num == CELL_DIVIDER_AUTO && den == CELL_DIVIDER_AUTO;
+}
+
+void cell_divider_migrate(uint16_t* num, uint16_t* den) {
+    if (*num == CELL_DIVIDER_NUM_DEFAULT && *den == CELL_DIVIDER_DEN_DEFAULT) {
+        *num = CELL_DIVIDER_AUTO;
+        *den = CELL_DIVIDER_AUTO;
+    }
+}
+
+void cell_divider_effective(uint8_t board, uint16_t cfg_num, uint16_t cfg_den, uint16_t* num, uint16_t* den) {
+    if (!cell_divider_is_auto(cfg_num, cfg_den) && cell_divider_valid(cfg_num, cfg_den)) {
+        *num = cfg_num;
+        *den = cfg_den;
+    } else if (board == BOARD_B) {
+        *num = CELL_DIVIDER_B_NUM;
+        *den = CELL_DIVIDER_B_DEN;
+    } else {
+        *num = CELL_DIVIDER_NUM_DEFAULT;
+        *den = CELL_DIVIDER_DEN_DEFAULT;
+    }
 }
 
 static bool channel_informative(uint16_t raw) {

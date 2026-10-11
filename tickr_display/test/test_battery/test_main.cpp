@@ -33,10 +33,19 @@ static uint32_t rail_fw(uint32_t rail_pin_mv) { return rail_pin_mv * RAIL_DIVIDE
 void test_mv_to_percent_clamps_and_interpolates() {
     TEST_ASSERT_EQUAL_UINT8(100, battery_mv_to_percent(4300));
     TEST_ASSERT_EQUAL_UINT8(100, battery_mv_to_percent(4200));
-    TEST_ASSERT_EQUAL_UINT8(95, battery_mv_to_percent(4150));
+    // A cell relaxed after the charger stopped (4.15-4.18 V) is full.
+    TEST_ASSERT_EQUAL_UINT8(100, battery_mv_to_percent(4170));
+    TEST_ASSERT_EQUAL_UINT8(100, battery_mv_to_percent(4150));
+    TEST_ASSERT_EQUAL_UINT8(97, battery_mv_to_percent(4125));
+    TEST_ASSERT_EQUAL_UINT8(94, battery_mv_to_percent(4100));
+    TEST_ASSERT_EQUAL_UINT8(86, battery_mv_to_percent(4050));
+    TEST_ASSERT_EQUAL_UINT8(78, battery_mv_to_percent(4000));
     TEST_ASSERT_EQUAL_UINT8(25, battery_mv_to_percent(3700));
     TEST_ASSERT_EQUAL_UINT8(0, battery_mv_to_percent(3300));
     TEST_ASSERT_EQUAL_UINT8(0, battery_mv_to_percent(2900));
+    // The LOW badge threshold (15 %) and the EMPTY latch are untouched by
+    // the new top of the table: 15 % still sits between 3.6 and 3.7 V.
+    TEST_ASSERT_TRUE(battery_mv_to_percent(3620) >= 15 && battery_mv_to_percent(3610) < 15);
 }
 
 void test_mv_to_percent_monotonic() {
@@ -102,6 +111,68 @@ void test_cell_divider_valid() {
     TEST_ASSERT_FALSE(cell_divider_valid(99, 100));    // < 1.0: pin above the node
     TEST_ASSERT_FALSE(cell_divider_valid(401, 100));   // > 4.0
     TEST_ASSERT_FALSE(cell_divider_valid(2000, 1001)); // den too large
+    // 0/0 is not a divider but the auto marker.
+    TEST_ASSERT_FALSE(cell_divider_valid(0, 0));
+    TEST_ASSERT_TRUE(cell_divider_is_auto(0, 0));
+    TEST_ASSERT_FALSE(cell_divider_is_auto(189, 100));
+    TEST_ASSERT_FALSE(cell_divider_is_auto(0, 100));
+}
+
+// The divider per board: rev A 189/100, rev B 200/100 (docs/HARDWARE.md
+// "Power sensing"), the config value on top when set. Why 2.0 on rev B: on
+// battery the rail (GPIO 33) is the cell behind the OR-ing diode, so it can
+// never read above the cell - with 1.89 it would (4.24 vs 3.98 V), with 2.0
+// the cell is 4.21 V and the rail 4.04 V (a Schottky-sized 0.17 V drop).
+void test_cell_divider_per_board() {
+    uint16_t n, d;
+    cell_divider_effective(BOARD_A, CELL_DIVIDER_AUTO, CELL_DIVIDER_AUTO, &n, &d);
+    TEST_ASSERT_EQUAL_UINT16(189, n); TEST_ASSERT_EQUAL_UINT16(100, d);
+    cell_divider_effective(BOARD_B, CELL_DIVIDER_AUTO, CELL_DIVIDER_AUTO, &n, &d);
+    TEST_ASSERT_EQUAL_UINT16(200, n); TEST_ASSERT_EQUAL_UINT16(100, d);
+    cell_divider_effective(BOARD_UNKNOWN, CELL_DIVIDER_AUTO, CELL_DIVIDER_AUTO, &n, &d);
+    TEST_ASSERT_EQUAL_UINT16(189, n); TEST_ASSERT_EQUAL_UINT16(100, d);
+    // A configured value wins on every board; an invalid one is auto.
+    cell_divider_effective(BOARD_B, 195, 100, &n, &d);
+    TEST_ASSERT_EQUAL_UINT16(195, n); TEST_ASSERT_EQUAL_UINT16(100, d);
+    cell_divider_effective(BOARD_A, 200, 100, &n, &d);
+    TEST_ASSERT_EQUAL_UINT16(200, n);
+    cell_divider_effective(BOARD_B, 50, 100, &n, &d);
+    TEST_ASSERT_EQUAL_UINT16(200, n);
+    // The rail on battery, in 2.0 units, lies below the cell on both units.
+    const uint32_t a_cell = cell_mv_from_pin(A_BATT_CELL_MV, 189, 100), a_rail = A_BATT_RAIL_MV * 2;   // 4190 / 3978
+    const uint32_t b_cell = cell_mv_from_pin(B_BATT_CELL_MV, 200, 100), b_rail = B_BATT_RAIL_MV * 2;   // 4210 / 4038
+    TEST_ASSERT_TRUE(a_rail < a_cell);
+    TEST_ASSERT_TRUE(b_rail < b_cell);
+    TEST_ASSERT_TRUE(cell_mv_from_pin(B_BATT_CELL_MV, 189, 100) < b_rail);   // the 1.89 reading contradicts the diode
+    // Rev B on the cable: a full charging cell, not 4.03 V.
+    TEST_ASSERT_EQUAL_UINT32(4264, cell_mv_from_pin(B_CABLE_CELL_MV, 200, 100));
+    TEST_ASSERT_EQUAL_UINT32(4218, cell_mv_from_pin(2109, 200, 100));          // unit B after a day on USB
+    // Migration of files written before the per-board dividers: the old
+    // explicit default becomes auto, a user's calibration stays.
+    n = 189; d = 100; cell_divider_migrate(&n, &d);
+    TEST_ASSERT_TRUE(cell_divider_is_auto(n, d));
+    n = 195; d = 100; cell_divider_migrate(&n, &d);
+    TEST_ASSERT_EQUAL_UINT16(195, n); TEST_ASSERT_EQUAL_UINT16(100, d);
+    n = 0; d = 0; cell_divider_migrate(&n, &d);
+    TEST_ASSERT_TRUE(cell_divider_is_auto(n, d));
+}
+
+// The USB / battery detector does not depend on the cell divider: rule A is
+// the rail alone, rule B the difference of the two PIN voltages. A divider
+// change moves the displayed cell voltage and the percentage, nothing else.
+void test_cell_divider_does_not_move_power_detection() {
+    for (int prev = 0; prev < 2; prev++) {
+        bool was_usb = prev == 1;
+        TEST_ASSERT_EQUAL(POWER_SENSE_BATTERY, power_sense_board(BOARD_B, B_BATT_RAIL_RAW, B_BATT_CELL_RAW,
+                                                                 rail_fw(B_BATT_RAIL_MV), diff(B_BATT_RAIL_MV, B_BATT_CELL_MV), was_usb));
+        TEST_ASSERT_EQUAL(POWER_SENSE_USB, power_sense_board(BOARD_B, B_CABLE_RAIL_RAW, B_CABLE_CELL_RAW,
+                                                             rail_fw(B_CABLE_RAIL_MV), diff(B_CABLE_RAIL_MV, B_CABLE_CELL_MV), was_usb));
+        // Unit B on USB as read on the bench with the 2.0 divider in effect: diff +419 mV.
+        TEST_ASSERT_EQUAL(POWER_SENSE_USB, power_sense_board(BOARD_B, 2915, 2395, rail_fw(2528), 2528 - 2109, was_usb));
+    }
+    // The EMPTY latch is in cell millivolts: with 2.0 it fires at a lower pin voltage (a lower true cell voltage).
+    TEST_ASSERT_TRUE(battery_is_low(cell_mv_from_pin(1649, 200, 100), false));
+    TEST_ASSERT_FALSE(battery_is_low(cell_mv_from_pin(1650, 200, 100), false));
 }
 
 // Battery percentage the status bar would show on the measured points
@@ -109,11 +180,13 @@ void test_cell_divider_valid() {
 void test_percent_on_measured_points() {
     const uint16_t n = CELL_DIVIDER_NUM_DEFAULT, d = CELL_DIVIDER_DEN_DEFAULT;
     uint8_t a = battery_mv_to_percent(cell_mv_from_pin(A_BATT_CELL_MV, n, d));   // 4190 mV
-    uint8_t b = battery_mv_to_percent(cell_mv_from_pin(B_BATT_CELL_MV, n, d));   // 3978 mV
-    TEST_ASSERT_EQUAL_UINT8(99, a);
-    TEST_ASSERT_EQUAL_UINT8(74, b);
+    uint8_t b_old = battery_mv_to_percent(cell_mv_from_pin(B_BATT_CELL_MV, n, d));   // 3978 mV with the rev A divider
+    uint8_t b = battery_mv_to_percent(cell_mv_from_pin(B_BATT_CELL_MV, CELL_DIVIDER_B_NUM, CELL_DIVIDER_B_DEN));   // 4210 mV
+    TEST_ASSERT_EQUAL_UINT8(100, a);
+    TEST_ASSERT_EQUAL_UINT8(74, b_old);     // the "80 % on a full cell" of the old reading
+    TEST_ASSERT_EQUAL_UINT8(100, b);
     TEST_ASSERT_EQUAL_UINT8(100, battery_percent_quantize(a, BATTERY_DISPLAY_STEP_PCT));
-    TEST_ASSERT_EQUAL_UINT8(75, battery_percent_quantize(b, BATTERY_DISPLAY_STEP_PCT));
+    TEST_ASSERT_EQUAL_UINT8(75, battery_percent_quantize(b_old, BATTERY_DISPLAY_STEP_PCT));
     // Neither is anywhere near the low-battery latch.
     TEST_ASSERT_FALSE(battery_is_low(cell_mv_from_pin(A_BATT_CELL_MV, n, d), false));
     TEST_ASSERT_FALSE(battery_is_low(cell_mv_from_pin(B_BATT_CELL_MV, n, d), false));
@@ -468,6 +541,8 @@ int runUnityTests() {
     RUN_TEST(test_low_battery_latch);
     RUN_TEST(test_cell_divider_on_measured_points);
     RUN_TEST(test_cell_divider_valid);
+    RUN_TEST(test_cell_divider_per_board);
+    RUN_TEST(test_cell_divider_does_not_move_power_detection);
     RUN_TEST(test_percent_on_measured_points);
     RUN_TEST(test_power_sense_rail_measured_points);
     RUN_TEST(test_rev_a_pads_needs_rail_rule);

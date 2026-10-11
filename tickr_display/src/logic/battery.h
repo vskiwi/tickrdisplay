@@ -14,16 +14,23 @@
 
 // Resistive dividers, calibrated pin millivolts -> node millivolts.
 //   Rail (GPIO 33): 21/10, fitted on the rev A unit (docs/HARDWARE.md "Power sensing").
-//   Cell (GPIO 32): 189/100 by default - the stock firmware's raw-count
-//   factor (1.702 V per uncalibrated count, docs/HARDWARE.md "Power sensing")
-//   puts a full charging cell at 4.20-4.23 V on both units, which on the
-//   calibrated pin millivolts is an effective 1.89. The value is a config
-//   field (AppConfig::adc_cell_num/den) so it can be corrected per device.
-//   TODO(hw-verify): multimeter on the cell vs pin_mv of GPIO 32.
+//   Cell (GPIO 32): per board revision (docs/HARDWARE.md "Power sensing").
+//   Rev A 189/100 - the stock firmware's raw-count factor (1.702 V per
+//   uncalibrated count) puts its full charging cell at 4.20-4.23 V, which on
+//   the calibrated pin millivolts is an effective 1.89. Rev B 200/100: its
+//   switched sense network divides differently - with 1.89 the rail would
+//   read *above* the cell on battery (4.24 vs 3.98 V), which the OR-ing
+//   diode between them makes impossible; with 2.0 the cell reads 4.21 V
+//   and the rail 4.04 V, a Schottky-sized drop. The config field
+//   (AppConfig::adc_cell_num/den) overrides both; 0/0 = "auto" (the board's
+//   value). TODO(hw-verify): multimeter on the cell vs pin_mv of GPIO 32.
 #define RAIL_DIVIDER_NUM          21u
 #define RAIL_DIVIDER_DEN          10u
-#define CELL_DIVIDER_NUM_DEFAULT  189u
+#define CELL_DIVIDER_NUM_DEFAULT  189u    // rev A (and the fallback for an unknown board)
 #define CELL_DIVIDER_DEN_DEFAULT  100u
+#define CELL_DIVIDER_B_NUM        200u    // rev B
+#define CELL_DIVIDER_B_DEN        100u
+#define CELL_DIVIDER_AUTO         0u      // config num = den = 0: the board's divider
 
 // USB / battery decision (docs/HARDWARE.md "Power sensing"). Both revisions
 // read the same two channels; the decision rule is picked per board profile
@@ -76,7 +83,8 @@
 #define BATTERY_DISPLAY_STEP_PCT  5u
 
 // Li-Ion open-circuit voltage (mV) -> 0..100 %. Piecewise-linear over a
-// typical 1S LiPo discharge curve; clamps outside [3300, 4200].
+// typical 1S LiPo discharge curve; clamps outside [3300, 4150] - a charger
+// stops at 4.20 V and the cell relaxes to 4.15-4.18 V, which is "full".
 uint8_t battery_mv_to_percent(uint32_t mv);
 
 // Snap a percentage to the display granularity (e.g. 5 %): 0,5,...,100.
@@ -93,6 +101,16 @@ bool battery_is_low(uint32_t mv, bool was_low);
 // back to the default).
 uint32_t cell_mv_from_pin(uint32_t pin_mv, uint16_t num, uint16_t den);
 bool     cell_divider_valid(uint16_t num, uint16_t den);
+// The config value 0/0 means "the board's divider".
+bool     cell_divider_is_auto(uint16_t num, uint16_t den);
+// Files written before the per-board dividers stored the then-default
+// 189/100 explicitly; that value is read as auto so a rev B gets its 2.0.
+// A value that differs from the old default is a user's calibration: kept.
+void     cell_divider_migrate(uint16_t* num, uint16_t* den);
+// The divider in effect: the config value when set and valid, else the
+// board's (A 189/100, B 200/100, ? the rev A value). Needs the board
+// profile (below), so it is resolved after power_init().
+void     cell_divider_effective(uint8_t board, uint16_t cfg_num, uint16_t cfg_den, uint16_t* num, uint16_t* den);
 
 // Power-source detector result.
 enum PowerSense : uint8_t {
