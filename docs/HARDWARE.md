@@ -64,7 +64,7 @@ Details and measured values: [Power sensing](#power-sensing).
 | Function | GPIO | Notes |
 |----------|------|-------|
 | Rail – "VIN" (`PIN_USB_VIN`, `vin_v` in the API) | 33 | ADC1_CH5, divider **21/10**. The system rail after the OR-ing element: VBUS with a cable, VBUS minus the pad drop through the stacking pads, the cell minus a diode drop on battery. Rev B reads the 3.3 V ceiling while GPIO 4 is low – the boot-time board-profile signature. Decision channel of rule `rail` (rev A) and, with GPIO 32, of rule `diff` (rev B). |
-| Cell – "VSYS" (`PIN_BAT_CELL`, `vsys_v` in the API) | 32 | ADC1_CH4, divider **189/100 by default** (config `adc_cell_num/den`). The cell / charger output on both revisions; source of `batt_pct` and of the low-battery latch. |
+| Cell – "VSYS" (`PIN_BAT_CELL`, `vsys_v` in the API) | 32 | ADC1_CH4, divider **per board revision: 189/100 on rev A, 200/100 on rev B** (config `adc_cell_num/den` overrides; `0/0` = auto). The cell / charger output on both revisions; source of `batt_pct` and of the low-battery latch. |
 | Sense enable (`PIN_BAT_SENSE_EN`) | 4 | **Rev B: enable of the GPIO 32/33 sensing network** – high (or the internal pull-up) switches 32/33 to the dividers; low / pull-down (reset default) / float leaves them at the ceiling and lets GPIO 34–39 follow the bus. No function on rev A. Driven HIGH while awake, LOW before deep sleep (not held). The stock firmware wrote it high without `pinMode` and never saw a cell on rev B. |
 | GPIO 34–39 | 34–39 | Input-only ADC1 pads, diagnostics only (`/api/power/raw` `aux[]`); no firmware decision is based on them. Rev B: follow the USB bus while the sense network is disabled. The stock firmware logs GPIO 37 (`Real charging mode: analog 37: %d …`) and uses it as a light-sleep wake source. |
 
@@ -145,11 +145,11 @@ Rail readings (GPIO 33 × 21/10, steady state, spread ≤ 5 mV) by supply path:
 | Stock partition table | `default.csv` incl. `coredump` (6 partitions) | same layout **without** `coredump` (5 partitions) |
 | Stock build | Feb 2025 build | a different build of the same code base; `xmc` flag in its status JSON |
 | GPIO 33 (rail) | live divider in every state: cable 5.18–5.27, pads 4.73–4.80, cell 4.17–4.18 V (fw units) | 3.3 V ceiling (raw 4095) while GPIO 4 is low; with GPIO 4 high the same divider: cable 5.37, pads 4.90–5.00, cell 4.24 V |
-| GPIO 32 (cell) | 4.18–4.23 V, follows the cell (−16 mV at the pin cable → battery) | ceiling while GPIO 4 is low; with GPIO 4 high 3.98–4.04 V (−27 mV at the pin cable → battery) |
+| GPIO 32 (cell) | 4.18–4.23 V with 189/100, follows the cell (−16 mV at the pin cable → battery) | ceiling while GPIO 4 is low; with GPIO 4 high 4.21–4.26 V with 200/100 (−27 mV at the pin cable → battery) |
 | GPIO 4 | no effect in any mode (output high/low, pull-up/-down, float) | **sense enable**: high or internal pull-up switches 32/33 to the dividers and 34–39 to 0; low / pull-down / float = 32/33 at 3.3 V, 34–39 follow the bus |
 | GPIO 34–39 (diagnostics) | 34 ≈ 80–113 raw, 35–39 = 0 in every state | GPIO 4 low: 34 ≈ 290 raw without a cable, all six 4095 with one (also through the pads). GPIO 4 high: 35/36/38/39 = 0, 37 ≈ 10–70 even with a cable |
 | **USB detection** | rule **`rail`**: GPIO 33 > 4.5 V = USB, < 4.35 V = battery, hysteresis in between; boot peak-hold of the rail; 3-poll debounce | rule **`diff`**: GPIO 33 − GPIO 32 at the pin > +80 mV = USB, < −30 mV = battery, hold in between; boot peak-hold of the difference; 3-poll debounce |
-| **Battery voltage / level** | GPIO 32 × 189/100 → `vsys_v`, `batt_pct`; 4.18 V on the cell → 100 % | the same, with GPIO 4 high; 3.98 V on the cell → 80 % |
+| **Battery voltage / level** | GPIO 32 × 189/100 → `vsys_v`, `batt_pct`; 4.18 V on the cell → 100 % | GPIO 32 × 200/100, with GPIO 4 high; 4.21 V on the cell → 100 % |
 | Deep-discharge protection | firmware (3.30 V latch, 3.45 V recover) + hardware | the same |
 | Firmware profile (`board` in `/api/status`) | `"A"` | `"B"` |
 
@@ -164,14 +164,33 @@ override (`auto | usb | battery`) sits on top of both profiles.
 
 `analogReadMilliVolts()` on GPIO 32 / GPIO 33, 12 bit, 11 dB attenuation,
 eFuse calibration, mean of 16 samples; the rail (GPIO 33) × 21/10, the cell
-(GPIO 32) × 189/100 by default (`logic/battery.h`, config `adc_cell_num/den`).
+(GPIO 32) × the board's divider – **189/100 on rev A, 200/100 on rev B**
+(`logic/battery.h`; config `adc_cell_num/den` overrides it per device, `0/0`
+= auto; `/api/status` → `cell_divider` names the one in effect).
 The 2.1 rail factor was fitted on rev A against the *uncalibrated*
 `raw × 3.3 / 4095` scale, not a multimeter, and is applied to a *calibrated*
 pin voltage – it can be off by up to ≈ 10 % (a 2.0:1 divider fits as well).
 The 1.89 cell factor is the stock firmware's raw-count factor translated to
-calibrated millivolts (a full charging cell = 4.20–4.23 V on both units). The
-ADC ceiling is ≈ 3150 mV at the pin, which the firmware reports as
-**6.615 V** on the rail (= 3150 × 2.1) when a channel is saturated.
+calibrated millivolts (a full charging rev A cell = 4.20–4.23 V). Rev B
+divides differently: with 1.89 its rail would read *above* its cell on
+battery (4.24 vs 3.98 V), which the OR-ing diode between the two makes
+impossible – with 2.0 the cell reads 4.21 V and the rail 4.04 V, a
+Schottky-sized drop, and a unit that sat on USB for a day reads a full
+4.22 V instead of 3.98 V. The USB / battery decision does not depend on the
+cell divider at all (rule `rail` reads the rail alone, rule `diff` the
+difference of the two *pin* voltages). The ADC ceiling is ≈ 3150 mV at the
+pin, which the firmware reports as **6.615 V** on the rail (= 3150 × 2.1)
+when a channel is saturated.
+
+**When the cell is read.** On battery the level of a wake-up is the reading
+taken right after boot, *before* Wi-Fi comes up – the radio's current sags
+the cell by tens of millivolts, which near the top of the curve is several
+percent. The percentage is mapped through a resting-voltage table (4.15 V
+and above = 100 %, 4.10 V = 94 %, 4.00 V = 78 %, 3.90 V = 62 %, 3.80 V = 45 %,
+3.70 V = 25 %, 3.60 V = 12 %, 3.30 V = 0 %), shown in 5 % steps; the step
+shown last is kept in RTC memory so a reading that drifts by less than a
+step between wake-ups does not move the badge. On USB the cell is polled
+live (the badge shows the bolt, not a level).
 
 ### Thresholds and where they come from
 
@@ -181,13 +200,13 @@ together.
 | Quantity | Value | Source |
 |----------|-------|--------|
 | Cell channel | GPIO 32 on both revisions; 16-sample calibrated mV | measured on both units; the stock firmware reads the same pin |
-| Cell divider | **189/100** default, config `adc_cell_num/den` | the stock's 1.702 V per raw count ⇒ ≈ 1.89 on calibrated mV; *not multimeter-checked* |
+| Cell divider | **rev A 189/100, rev B 200/100**; config `adc_cell_num/den` overrides (`0/0` = auto) | A: the stock's 1.702 V per raw count ⇒ ≈ 1.89 on calibrated mV; B: the rail-below-cell constraint on battery; *not multimeter-checked* |
 | Rail channel / divider | GPIO 33, **21/10** | fitted on rev A; 2.0 would fit a 4.99 V VBUS – *not multimeter-checked* |
 | Stock cable detector | `analogRead(33) > 2500` raw (≈ 4.26 V on the stock scale) – **not copied** | sits at the full-cell level on rev A, meaningless on rev B with the network off |
 | USB / battery rule, rev A | rail(33) × 2.1 > **4.50 V** ⇒ usb, < **4.35 V** ⇒ battery (hysteresis) | measured points below |
 | USB / battery rule, rev B | rail(33) − cell(32) at the pin > **+80 mV** ⇒ usb, < **−30 mV** ⇒ battery, hold in between; `invalid` if a channel is ≥ 4080 or ≤ 8 raw | measured points below |
 | Stock percentage tiers, as cell voltage via the stock formula | ≤ 30 % "high" saving + icon ≈ 3.77 V; < 4 % sleep card ≈ 3.35 V; < 2 % off ≈ 3.30 V | stock firmware (interpretation) |
-| TickrDisplay battery thresholds | BATTERY LOW badge **15 % (≈ 3.62 V)**; EMPTY latch **3.30 V**, recover **3.45 V**; 5 % display steps | `battery.h`, `device_state.h` |
+| TickrDisplay battery thresholds | BATTERY LOW badge **15 % (≈ 3.62 V)**; EMPTY latch **3.30 V**, recover **3.45 V**; 5 % display steps; LED held through the sleep (`led_battery = hold`) down to **30 %** | `battery.h`, `device_state.h`, `ticker.h` |
 | Sense enable | GPIO 4 `PIN_BAT_SENSE_EN` high while awake (both revisions), low before deep sleep; 150 ms settle after the enable (the stock's `delay(150)`) | measured on rev B |
 
 ### Detector
@@ -238,11 +257,11 @@ board profile, because the two boards' OR-ing elements differ.
    what those guards lean on. See [`DEVICE_UI.md`](DEVICE_UI.md) →
    *Power-mode switch*.
 4. **Cell level, both revisions.** `vsys_v` / `batt_pct` / the low-battery
-   latch (3.30 V, recover 3.45 V) from GPIO 32 × 189/100: rev A 4.18 V →
-   100 %, rev B 3.98 V → 80 % on the cell (5 % steps); `null` and the *BAT*
-   outline only on `?`. The BATTERY LOW badge (≤ 15 %, ≈ 3.62 V with this
-   divider) and the EMPTY card (3.30 V) are drawn on both revisions; a board
-   `?` gets neither (`batt_known false`).
+   latch (3.30 V, recover 3.45 V) from GPIO 32 × the board's divider: rev A
+   4.18 V → 100 %, rev B 4.21 V → 100 % on the cell (5 % steps); `null` and
+   the *BAT* outline only on `?`. The BATTERY LOW badge (≤ 15 %, ≈ 3.62 V)
+   and the EMPTY card (3.30 V) are drawn on both revisions; a board `?` gets
+   neither (`batt_known false`).
 5. **Deep sleep.** `power_deep_sleep()` drives GPIO 4 **LOW** (not held; the
    pad floats in sleep, which on rev B also leaves the network off), then
    the usual holds (EPD power, LEDs, amplifier).
@@ -386,13 +405,15 @@ recovery image is fetched over HTTP without TLS.
 > not measured.
 
 > **Unverified:** the true divider ratios on GPIO 32/33 – 2.0 vs 2.1 on the
-> rail, 1.89 vs 2.0 on the cell. Neither node is reachable without opening
-> the case, so the cell divider stays a config field (`adc_cell_num/den`).
-> Either the two channels have different dividers (32 ≈ 1.9, 33 ≈ 2.0–2.1)
-> or GPIO 32 is not the bare cell. The 33 − 32 gap on battery – 0.46–0.48 V
-> on rev A, ≈ 0.17 V on rev B after the dividers – points at a silicon diode
-> on rev A and a Schottky / ideal diode on rev B between the cell and the
-> rail (interpretation).
+> rail, 1.89 (rev A) and 2.0 (rev B) on the cell. Neither node is reachable
+> without opening the case, so the cell divider stays a config field
+> (`adc_cell_num/den`). The rev B value rests on one constraint (the rail is
+> the cell behind a diode, so it cannot read above it), not on a meter; a
+> discharge of a rev B unit from full to the EMPTY card has not been logged
+> with it. The 33 − 32 gap on battery – 0.46–0.48 V on rev A, ≈ 0.17 V on
+> rev B after the dividers – points at a silicon diode on rev A and a
+> Schottky / ideal diode on rev B between the cell and the rail
+> (interpretation).
 
 > **Unverified:** the BATTERY LOW badge and the BATTERY EMPTY card have not
 > been seen on the e-ink; the runtime USB → battery switch (cable pulled from
@@ -422,14 +443,15 @@ Open hardware questions:
 ## Appendix – measured points
 
 Release build, `power_mode auto`, `GET /api/power/raw`, three samples per
-row, spreads ≤ 5 mV; cell = GPIO 32 × 1.89, rail = GPIO 33 × 2.1.
+row, spreads ≤ 5 mV; cell = GPIO 32 × 1.89 (the divider of both boards at
+the time; rev B now uses 2.0), rail = GPIO 33 × 2.1.
 
 | Configuration | Unit | `rule` | Cell | Rail | `diff_mv` | Result |
 |---|---|---|---|---|---|---|
 | Cable in A, B on top (pads) | A | rail | 4.21 V | 5.27 V | +282 | usb |
 | same | B | diff | 4.03 V | 5.00 V | +250 | usb (`boot_diff` +279…+284) |
 | Cable out, both on their cells (stacked) | A | rail | 4.18 V | 4.17 V | −228 | battery, 100 % |
-| same | B | diff | 3.98 V | 4.24 V | −87…−92 | battery, 80 % |
+| same | B | diff | 3.98 V (4.21 V with 200/100) | 4.24 V | −87…−92 | battery, 80 % (100 % with 200/100) |
 | Cable in B, A on top (pads), runtime switch | A | rail | 4.23 V | 4.79 V | +42…+45 (hold band) | usb – by the rail |
 | same | B | diff | 4.04 V | 5.37 V | +415 | usb |
 | A power-switch cycle on B's pads (boot path) | A | rail | 4.23 V | 4.80 V | +45 | usb; `boot_rail_min` = `max` = 4819 mV |

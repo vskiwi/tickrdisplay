@@ -21,11 +21,49 @@ Until `1.0.0` minor versions may contain breaking changes.
   that goes silent after the TCP connect no longer holds the main task long
   enough for the task watchdog to reboot the device.
 
+- **Power**: the battery percentage of a rev B unit read 75–85 % on a full
+  cell – its cell channel divides differently from rev A's. The cell
+  divider is now chosen per board revision (rev A 189/100, rev B 200/100);
+  a configured `adc_cell_num/den` still overrides it, and the old explicit
+  default in a saved configuration is read as "auto". The USB / battery
+  decision is unaffected (it never used the cell divider).
+- **Power**: on battery the cell is read once at boot, before Wi-Fi draws
+  current, and that reading is the level of the whole wake-up; the level
+  shown last is kept across deep sleep so the 5 % display step no longer
+  flips between wake-ups on a reading that drifted by less.
+
 ### Added
 
+- **LED**: a *LED on battery* setting (`led_battery`: `off` · `hold`,
+  default `off`). With `hold` the LED's colour stays lit through the deep
+  sleep – each channel fully on or off – while the cell is at 30 % or
+  more, and comes back at the wake-up without a blink; below 30 % the bar
+  is dark until the cell is charged. A lit LED shortens battery life
+  several times ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md) → *LED and
+  sound*).
+- **Power**: a **settings window** for battery devices – switched off and
+  on with the power switch while on battery, a device with a source stays
+  awake for 3 minutes with *On battery* and its `http://<ip>/` on the
+  panel, so the ticker or the interval can be changed from the browser
+  without USB; then it restarts into the battery flow. Only after a
+  power-on (not after an update, a wake-up or a crash)
+  ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md) → *Power-mode switch*).
+- **Web UI**: *LED on battery* in the Content editor next to the LED
+  rule; the interval hint on a battery device names the cost of a
+  1-minute interval.
 - **API**: `GET /api/status` reports `boot_count`, `crash_count`,
-  `crash_last_reason` (kept across every reset but a power-on) and
-  `loop_stack_min_free` ([`docs/API.md`](docs/API.md)).
+  `crash_last_reason` (kept across every reset but a power-on),
+  `loop_stack_min_free` and `cell_divider` (the divider in effect);
+  `led_battery` in `GET /api/config` / `POST /config`; `adc_cell_num/den`
+  accept `0`/`0` = auto ([`docs/API.md`](docs/API.md)).
+
+### Changed
+
+- **LED**: on battery the end-of-wake green blink after a successful fetch
+  is skipped when the `sign` rule has coloured the LED – a red "down"
+  colour is no longer overwritten by a green "fetched" blink; the red blink
+  after a miss stays. The battery percentage reads 100 % from 4.15 V – a
+  charger stops at 4.20 V and the cell relaxes below it.
 
 ## [0.3.0] - 2026-10-10
 

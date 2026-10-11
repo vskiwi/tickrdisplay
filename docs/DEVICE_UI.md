@@ -33,8 +33,8 @@ flickers never reaches the panel.
 | 9 | **Identify** | `POST /api/screen/identify {"n","ttl_s"}`, default 30 s | Digit ≈ 100 px, device name 9 pt; whole panel, no badges |
 | 10 | **OFFLINE** card | USB: 10 min of continuous Wi-Fi outage, once per outage; a reconnection counts only after it held 30 s. Battery: row 5 | Crossed-Wi-Fi glyph 49×26 on top, *No Wi-Fi* 18 pt, *last update N min ago* (→ *N h ago* from 60 min) 12 pt; no age line on a device that never showed content. New content replaces it |
 | 11 | **OTA** card | Start of any flash: `/update`, `update_from_url`, ArduinoOTA | Ring-arrow glyph 45×45, *Updating* 18 pt / *keep the power on* 12 pt; LED blue steady, green 3 s on success until the deferred restart; a failed upload restores the base frame within 1 s |
-| 12 | **ON BATTERY** card | Debounced USB → battery flip while awake, held 5 s, one card per 10-min window; never at boot, never for battery → USB, never on the 3rd flip inside 10 min (*flapping*: badge only) | Battery glyph 80×40 at the level (outline only on board `?`), *On battery* 18 pt and – only when the restart into the battery flow follows – *updates every N min* 12 pt (N = refresh interval, 60 when unset); LED amber flash 0.5 s, no sound |
-| 13 | **Power-mode restart** | 120 s after the debounced flip (600 s when flapping or when the previous reading stood < 60 s); deferred while OTA / identify / pairing / recovery / portal hold the panel | Nothing drawn: the device restarts into the battery flow with an RTC marker; the next boot keeps the content on the panel (no clear-to-white) and the first battery pull replaces it |
+| 12 | **ON BATTERY** card | Debounced USB → battery flip while awake, held 5 s, one card per 10-min window; never at boot, never for battery → USB, never on the 3rd flip inside 10 min (*flapping*: badge only). Also the **settings window**: a battery device switched on with the power switch shows it for the whole window | Battery glyph 80×40 at the level (outline only on board `?`), *On battery* 18 pt and – only when the restart into the battery flow follows – *updates every N min* 12 pt (N = refresh interval, 60 when unset); in the settings window the second line is `http://<ip>/` instead; LED amber flash 0.5 s on the flip, no sound |
+| 13 | **Power-mode restart** | 120 s after the debounced flip (600 s when flapping or when the previous reading stood < 60 s), or the end of the settings window; deferred while OTA / identify / pairing / recovery / portal hold the panel | Nothing drawn: the device restarts into the battery flow with an RTC marker; the next boot keeps the content on the panel (no clear-to-white) and the first battery pull replaces it |
 
 `power: unknown` (unrecognised board `?`): no card, no power glyph, the
 device behaves as USB; `/api/screen/state.status` says `power: "unknown"`
@@ -221,6 +221,25 @@ transitions matter:
   *booted* on battery without a URL and receives one while awake keeps
   running as USB until a power cycle.
 
+* **Settings window – switched on with the slider while on battery.** A
+  battery device has no web UI between wake-ups, so the one gesture it has –
+  the power switch – opens one: a boot on battery whose reset is a cold one
+  (power-on, EN pin or brownout, the kinds the recovery counter treats as
+  the user at the switch) with a Pull URL or a ticker configured runs the
+  USB flow for **3 min** (`DS_SETUP_WINDOW_MS`): Wi-Fi up, web UI and API
+  reachable, the ON BATTERY card on the panel with `http://<ip>/` as its
+  second line, no fetch of its own – a source saved during the window
+  fetches at once and its content replaces the card. When the window ends
+  the device restarts into the battery flow (the power-mode restart above);
+  USB plugged in meanwhile simply leaves it awake. No window after a
+  software restart (that is how the window ends, and how OTA and the portal
+  timeout restart), a deep-sleep wake-up or a crash, none without a source
+  (that device shows WAITING and stays awake anyway), none on the boot that
+  completes a recovery series, and none when Wi-Fi does not come up within
+  the battery budget – that wake fails like any other. A flash, a pairing
+  or identify frame, recovery mode or the portal at the end of the window
+  defer the restart until they are over.
+
 * **Battery → USB while asleep.** The device wakes on the RTC timer only –
   there is no GPIO wake on USB – so USB is noticed at the next scheduled
   wake at the earliest (up to the refresh interval later). That wake draws
@@ -350,12 +369,49 @@ colour actually driven, overlay included.
 | 7 | BATTERY LOW badge | off | none |
 | 8 | OFFLINE (after `T_long`) | base colour off; one amber pulse every 10 s on USB | none |
 | 9 | ON BATTERY card | amber flash 0.5 s when the card is drawn | none |
-| 10 | Battery wake end | green / red 300 ms (direct write, no loop on the battery flow) | none |
+| 10 | Battery wake end | red 300 ms after a miss; green 300 ms after a success unless the `sign` rule coloured the LED (then that colour simply stays); the base colour returns after the blink | none |
+| 11 | Deep sleep (`led_battery`) | `off`: the LED pins are held dark; `hold`: the base colour is held lit, full on per channel (no PWM in deep sleep), while the level is ≥ 30 %, dark below | none |
 | base | CONTENT | `alert.led`, or red / green by `dir`; off when the rule is `off` | payload `alert.sound` |
 
 A fetch / extract error never turns the LED red (red means "down");
-overlays run on USB only except 6 and 10; sound is never used for
+overlays run on USB only except 6, 10 and 11; sound is never used for
 conditions – it stays a payload matter.
+
+**What `sign` compares.** The direction is the sign of the *change the
+source reports* – the 24 h change of CoinGecko / Binance, the change
+against the day's open on Kraken, a payload's own `change` / `dir`
+([`TICKERS.md`](TICKERS.md) → *Presets*). The firmware never compares one
+fetch with the previous one, so the colour does not flip on minute-to-minute
+noise; it changes only when the reported change crosses zero. A change that
+rounds to `0.00%` keeps the previous colour. Without a change (text
+payload, source without a change path) the rule writes nothing and the
+LED stays at the payload's `alert.led` or off. In the grid the first ticker
+decides.
+
+**On battery.** The base colour is written when the frame is rendered and
+shows while the panel refreshes (red / green under `sign`); then the wake
+ends with the row 10 blink and the device sleeps. What the bar does during
+the sleep is the setting **`led_battery`** (Content editor, next to the LED
+rule; `GET /api/config` / `POST /config`):
+
+* **`off`** (default): the LED pins are held dark for the whole deep sleep –
+  the bar is lit only during the few seconds of a wake-up.
+* **`hold`**: the base colour stays lit through the sleep, each channel
+  fully on or off (deep sleep has no PWM, so `alert.led` colours are
+  rounded to the nearest of the eight pure colours), as long as the level
+  read at the wake is **30 % or more**; below that the pins are held dark
+  until the cell is charged again. The held colour survives the next
+  wake-up without a blink: the pins come up at the same levels and the
+  frame sets the new colour over them. With `led_rule = off` and a ticker
+  source there is no colour to hold – the setting only matters with the
+  sign rule or a payload's `alert.led`. A lit LED is the largest steady
+  consumer of a sleeping device: expect the cell to last **several times
+  less** than with `off` – the LED's current has not been measured, so no
+  figure in days is given.
+
+A device that was running on USB keeps its colour for the grace after the
+cable is pulled (row 9, *Power-mode switch*) and then follows the setting
+with the restart into the battery flow.
 
 ## The panel shows the same frame
 
@@ -388,6 +444,14 @@ frame, so the shelf shows the sleeper's last card.
 > awake unit: card, grace, restart into the battery flow) and the
 > partial-refresh battery wake are host-tested only; the awake-time saving
 > of a partial wake (≈ 3.3 s) is an estimate from the driver constants.
+
+> **Unverified:** `led_battery = hold` on a real cell – the colour staying
+> lit through a deep sleep, coming up without a blink at the wake-up and
+> going dark below 30 % – and the settings window after the power switch
+> (the card with the address, the restart into the battery flow after
+> 3 min) are host-tested; the bench exercises the battery flow through the
+> `power_source` override on USB power, where the sleep itself cannot be
+> watched and the switch is not involved.
 
 > **Unverified:** the LED breathe period (2 s) and the amber tint
 > (255, 120, 0) have not been judged on the bar; the double full after a

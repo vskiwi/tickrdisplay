@@ -45,7 +45,7 @@ The stock TickrMeter is a thin client of the vendor's cloud: the cloud picks the
 ### Feature highlights
 
 * **Cloud-free crypto tickers** – pick CoinGecko / Kraken / Binance (or *Custom JSON*) in the browser, press *Test*, save; the device fetches over HTTPS against roots baked into the firmware.
-* **Two power modes, detected automatically** – USB: always on, instant HTTP/MQTT updates. Battery: deep sleep, wake every N minutes, fetch, redraw once, sleep; exponential back-off, low-battery protection.
+* **Two power modes, detected automatically** – USB: always on, instant HTTP/MQTT updates. Battery: deep sleep, wake every N minutes, fetch, redraw once, sleep; exponential back-off, low-battery protection. On battery the web UI is only up during the few seconds of a wake-up – plug in USB to change settings, or switch the device off and on: it then stays awake for 3 minutes with its address on the panel. The LED is dark between wake-ups unless you choose to hold its colour through the sleep.
 * **One JSON payload for every path** – `POST /api/screen`, MQTT topic or Pull URL; `title`, `value`, `alert.led`, `alert.sound`, `alert.volume`, plus the ticker fields `change`, `dir`, `age_s`, `time`, `spark[]`.
 * **Gentle on the e-ink** – differential (partial) refreshes by default, no inversion flash on every price change; a full refresh only where it is needed.
 * **The shelf** – every device as a live card, click for its device sheet, drag to arrange, *Identify* shows a number on each e-ink. Works on a phone.
@@ -86,9 +86,9 @@ Settings live in `/config.json` on the device and are edited on **`http://<devic
 
 * **Content source** – *Text* (push), *Ticker* (the device fetches), *Custom JSON URL* (Pull URL, HTTP or HTTPS), *MQTT* (broker `<BROKER_HOST>`, port, topic, user/password; retained `<topic>/status` online/offline), *Push only*.
 * **Refresh interval** – 1–1440 minutes; the deep-sleep period on battery, the pull/ticker period on USB.
-* **LED rule** – `off` (the payload decides) or `sign` (red when down, green when up).
+* **LED rule** – `off` (the payload decides) or `sign` (red when down, green when up). **LED on battery** – `off` (dark between wake-ups) or `hold` (the colour stays lit through the deep sleep while the cell is at 30 % or more; shortens battery life several times).
 * **Security** – API token (HTTP Basic `-u :<token>` or `X-Api-Token`); required for everything that changes state, uploads or reveals a secret. Read-only data and the pages stay open. Secrets are never echoed back.
-* **Power** – power-source override (`auto` / `usb` / `battery`), cell-divider calibration, live voltages.
+* **Power** – power-source override (`auto` / `usb` / `battery`), live voltages; the cell divider is per board revision (`adc_cell_num/den` in the API overrides it).
 * **Advanced** – TLS root CA for an HTTPS Pull URL, MQTT credentials, OTA password (developer build).
 
 How the pages behave: **[`docs/WEB_UI.md`](docs/WEB_UI.md)**. Every field, the payload format and the complete HTTP/MQTT API: **[`docs/API.md`](docs/API.md)**.
@@ -155,6 +155,7 @@ Step by step, how to tell the old image from the new one, slots, backups, UART a
 | E-ink says *Wi-Fi setup* after flashing | Join `TickrDisplay`, open `http://192.168.244.1`, pick your network. The portal closes 180 s after the last client leaves |
 | Shelf is read-only / `401 – token?` | Enter the API token once in the bar at the top; it is kept in this browser. Lost it → [recovery mode](#lost-your-token-or-wi-fi-recovery-mode) |
 | Device shows the battery glyph although it is stacked | Stacking pads not making contact – the unit runs on its cell and will deep-sleep. `GET /api/status` shows `power` |
+| Web UI unreachable, ping fails, the LED only blinks once per interval | The device runs on battery: it deep-sleeps between fetches and answers only during the wake-up (about ten seconds). Not a reboot. Switch it off and on – it stays awake for 3 minutes with `http://<ip>/` on the panel – or connect USB (noticed at the next wake-up, at once after a switch off/on) ([`docs/TICKERS.md`](docs/TICKERS.md) → *Fetch schedule and errors*) |
 | Ticker shows *stale N min* / `last_error` says `pull: http 451` | Exchange unreachable or geo-blocked; try another preset or a local proxy |
 | `power: unknown` | Unrecognised board – set the power source manually on `/system` → *Power* and open an issue with the output of `/api/power/raw` |
 | `POST /update` answers `401` only after the whole upload | Expected: the token is checked when the request completes; nothing is written to flash |
@@ -182,6 +183,7 @@ Environments, build flags, size gate, web-UI build step, tests and CI: **[`docs/
 Everything below exists in the firmware and is covered by host tests where a pure module is involved, but has **not been exercised on real hardware** – reports are welcome. The per-topic notes live in the linked documents.
 
 * **Battery life and deep sleep** – the full deep-sleep cycle on the cell with the current power detector, deep-sleep current and battery life are not measured; the ticker on a battery device (one fetch per wake, the sparkline history surviving deep sleep) is host-tested only ([`docs/HARDWARE.md`](docs/HARDWARE.md), [`docs/TICKERS.md`](docs/TICKERS.md)).
+* **LED through the sleep, the settings window, the battery percentage** – *LED on battery* = `hold` on a real cell (lit through the sleep, no blink at the wake-up, dark below 30 %), the 3-minute settings window after the power switch, and the rev B cell divider (200/100, derived from the rail-below-cell constraint rather than a meter) with a logged discharge to the EMPTY card ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md), [`docs/HARDWARE.md`](docs/HARDWARE.md)).
 * **Runtime USB → battery switch** – cable pulled from an awake unit: the *On battery* card, the 2-min grace and the restart into the battery flow; likewise the partial-refresh battery wake ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
 * **Low-battery screens** – the BATTERY LOW badge and the BATTERY EMPTY card have never been seen on the e-ink ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).
 * **Offline card and link supervisor** – the *No Wi-Fi* card after 10 min without the router, the restore after the link holds again, the firmware's own reconnect attempts and the restart after 30 min offline have not been run as a staged router outage on the bench ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md)).

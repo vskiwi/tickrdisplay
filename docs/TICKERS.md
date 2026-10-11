@@ -156,7 +156,9 @@ sparkline bottom-left, the age line bottom-right, badges in the corner
 * **LED**: with the device setting *LED rule* = `sign`, green on an up-move,
   red on a down-move, **unchanged** on flat; `off` (default) leaves the LED
   to the payload's `alert.led`. A fetch failure never touches the LED – red
-  means "down", not "broken".
+  means "down", not "broken". On battery the colour is held through the
+  deep sleep only with *LED on battery* = `hold` ([`DEVICE_UI.md`](DEVICE_UI.md)
+  → *LED and sound*).
 * **Age line**: *just now* under a minute, then `5 min ago` / `2 h ago` /
   `3 d ago`, counted from the fetch. Past **T_stale** = 3 × the refresh
   interval (at least 10 min) it reads **`stale 40 min`** / `stale 3 h` and
@@ -243,13 +245,30 @@ cycle (§5) is all its requests in a row and one frame; it is a miss only
 when every source failed.
 
 **Battery power.** One fetch cycle per wake-up, then deep sleep for the
-refresh interval (at least 15 min with a grid); the LED blinks green after a
-success, red after a miss. A miss
+refresh interval (at least 15 min with a grid); the LED blinks red after a
+miss and green after a success – unless the `sign` rule coloured it, then
+the colour stays. A miss
 doubles the sleep (2×, 4× …, capped at 60 min, never below the interval);
 the first miss draws nothing, the second and every fourth after it draw the
 OFFLINE card with the age of the shown quote ([`DEVICE_UI.md`](DEVICE_UI.md)
 → *E-ink refresh rules*). Every fetch is a TLS handshake (≈ 2 s awake);
-15 min or more is kind to the cell.
+15 min or more is kind to the cell. **The web UI and the API answer only
+while the device is awake** – roughly ten seconds per cycle, from the Wi-Fi
+connect to the deep sleep – so a battery device cannot be configured from
+the browser in practice: the shelf shows it *asleep* and says *plug it in*.
+To change its settings either connect USB power – a sleeping device
+notices the cable at its next wake-up (up to one interval later); switching
+it off and on with the cable in brings it up as a USB device at once – or
+**switch the device off and on while on battery**: it then stays awake for
+**3 minutes** with *On battery* and its `http://<ip>/` on the panel, long
+enough to change the ticker or the interval, and goes back to sleeping
+afterwards ([`DEVICE_UI.md`](DEVICE_UI.md) → *Power-mode switch*). Between
+wake-ups the LED is dark unless *LED on battery* is set to `hold`
+([`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*). An interval of a few
+minutes on battery is expensive: every wake-up costs the same ten seconds
+of Wi-Fi and TLS, so by estimate 1 min empties a cell in about two days
+where 60 min lasts months (battery life is not measured – README → *Known
+limitations*).
 
 **What a failure looks like.** The previous frame stays, no card, the LED
 is untouched; the age line grows old and eventually reads `stale N min`.

@@ -60,15 +60,17 @@ it. Everything about the fleet is on the toolbar and in the drawer.
 2. Choose the **Source**: *Text*, *Ticker*, *Custom JSON URL*, *MQTT* or
    *Push only*. The selector opens on the source the device uses now.
 3. *Text*: title and value, optional *Reactions* (LED colour, sound preset,
-   volume, LED rule) → *Send*. *Ticker*: *View* (one ticker, or the 2×2
+   volume, LED rule, LED on battery) → *Send*. *Ticker*: *View* (one ticker, or the 2×2
    grid with up to four rows – preset, symbol, market, short name, ▲ ▼ ✕,
    *Test* per row, *+ Add ticker*; the radio button picks the row whose
    *Advanced* settings are shown), market preset (CoinGecko, Kraken,
    Binance, Custom JSON), symbol / market, interval (a 15-minute floor on
    battery with a grid), optional *Test* (one fetch on the device, nothing
    saved), *Advanced* (label, short name for the panel badge, decimals,
-   separator, LED rule) → *Save* ([`TICKERS.md`](TICKERS.md) → *Setting it
-   up in the web UI*). *Custom JSON URL*: URL + interval → *Save*.
+   separator, LED rule, LED on battery – `off`, or `hold` the colour through
+   the deep sleep down to 30 %, which shortens battery life several times;
+   [`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*) → *Save*
+   ([`TICKERS.md`](TICKERS.md) → *Setting it up in the web UI*). *Custom JSON URL*: URL + interval → *Save*.
    *MQTT* shows broker and topic with a link to that device's `/system`;
    *Push only* shows a ready `curl` line.
 4. The card's next frame poll shows the result.
