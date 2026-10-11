@@ -18,6 +18,7 @@
 #include "managers/recovery_manager.h"
 #include "managers/wifi_portal.h"
 #include "managers/config_manager.h"
+#include "managers/boot_stats.h"
 #include "logic/renderer.h"
 #include "logic/command_queue.h"
 #include "logic/battery.h"
@@ -32,6 +33,12 @@
 // melodies <= 15 s). The Wi-Fi setup portal blocks up to 180 s of inactivity,
 // so loop() is only subscribed after connectivity init.
 #define WDT_TIMEOUT_S 30
+
+// Main (loop) task stack. The core's default of 8 KB leaves about 1.5 KB
+// after a TLS fetch with certificate verification (loop_stack_min_free in
+// GET /api/status); 12 KB keeps a margin for a longer certificate chain or
+// a redirect. The extra 4 KB comes out of the heap once at boot.
+SET_LOOP_TASK_STACK_SIZE(12 * 1024);
 
 ConnectivityManager cm;
 
@@ -194,6 +201,7 @@ static void battery_fail(uint32_t interval_min) {
 
 void setup() {
     rom_hooks_init();   // before the first printf: the ROM printf's %f hook (rom_hooks.h)
+    boot_stats_init(esp_reset_reason());   // boot / crash counters for /api/status (boot_stats.h)
     Serial.begin(115200);
     // small delay for serial to stabilize
     delay(500);
@@ -246,12 +254,20 @@ void setup() {
     // before cm.init() loads the configuration: mount the FS and read it
     // once here (cm.init() reads the file again; LittleFS.begin() on a
     // mounted FS is a no-op).
+    // The copy lives on the heap, not in setup()'s frame: on battery the
+    // ticker fetch (TLS handshake + certificate chain, the deepest call
+    // chain of the firmware) runs from setup() below, and a 2 KB AppConfig
+    // on this frame left it short of stack (stack canary -> panic -> reboot
+    // on every wake-up).
     {
         config_init();
-        AppConfig early;
-        config_load(early);
-        power_set_mode((PowerMode)early.power_source);
-        power_set_cell_divider(early.adc_cell_num, early.adc_cell_den);
+        AppConfig* early = new AppConfig();
+        if (early) {
+            config_load(*early);
+            power_set_mode((PowerMode)early->power_source);
+            power_set_cell_divider(early->adc_cell_num, early->adc_cell_den);
+            delete early;
+        }
         relay_begin();   // /relay, /peers directories + the nonce store
     }
 

@@ -8,6 +8,25 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Power**: a battery-powered device rebooted on every wake-up (a reboot
+  loop, no content) when its ticker source was the CoinGecko or Kraken
+  preset or the 2×2 grid – the main task ran out of stack during the TLS fetch that the
+  battery flow performs at boot. The main task now has a larger stack and the
+  boot-time configuration copy no longer sits on it. USB-powered devices and
+  battery devices on a Binance single ticker were not affected.
+- **Tickers**: the TLS handshake of a fetch is bounded by the same 10-second
+  timeout as the rest of the request (the core's default was 120 s); a server
+  that goes silent after the TCP connect no longer holds the main task long
+  enough for the task watchdog to reboot the device.
+
+### Added
+
+- **API**: `GET /api/status` reports `boot_count`, `crash_count`,
+  `crash_last_reason` (kept across every reset but a power-on) and
+  `loop_stack_min_free` ([`docs/API.md`](docs/API.md)).
+
 ## [0.3.0] - 2026-10-10
 
 ### Added

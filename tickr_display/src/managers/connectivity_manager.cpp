@@ -11,6 +11,7 @@
 #include "arduino_ota.h"
 #include "wifi_portal.h"
 #include "wifi_link.h"
+#include "boot_stats.h"
 #include "recovery_manager.h"
 #include "peer_manager.h"
 #include "pairing_manager.h"
@@ -653,6 +654,15 @@ void ConnectivityManager::handle_status(AsyncWebServerRequest* request) {
     doc["auth_enabled"] = strlen(_config.api_token) > 0;
     doc["tls_insecure_used"] = _tls_insecure_used;
     doc["reset_reason"] = (int)esp_reset_reason();
+    // Boot / crash counters since power-on and the main task's stack
+    // high-water mark (managers/boot_stats.h): a reboot loop is visible here
+    // even when every boot looks healthy by itself.
+    BootStats bs;
+    boot_stats_get(&bs);
+    doc["boot_count"] = bs.boots;
+    doc["crash_count"] = bs.crashes;
+    doc["crash_last_reason"] = bs.crash_reason;
+    doc["loop_stack_min_free"] = bs.loop_stack_min;
     doc["last_error"] = _last_error;
     // Link diagnostics (managers/wifi_link.h): counters kept across software
     // restarts and deep sleep, zero after a power-on.
@@ -1147,6 +1157,12 @@ bool ConnectivityManager::open_client(PullClient& pc, bool https, uint8_t tls_mo
         setLastError("pull: out of memory (tls)");
         return false;
     }
+    // The core's default TLS handshake limit is 120 s: a server (or a path)
+    // that goes silent after the TCP connect would hold the loop task past
+    // the 30 s task watchdog in main.cpp and reboot the device. Bound it to
+    // the pull timeout like every other step of the request (the argument is
+    // in seconds).
+    pc.secure->setHandshakeTimeout(HTTP_PULL_TIMEOUT_MS / 1000);
     if (tls_mode != TLS_BUNDLE) pc.ca = config_ca_load();
     if (pc.ca.length() > 0) {
         pc.secure->setCACert(pc.ca.c_str());
