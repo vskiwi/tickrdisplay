@@ -18,7 +18,7 @@ void tearDown(void) {}
 void test_full_payload(void) {
     TEST_ASSERT_EQUAL(PAYLOAD_OK, parse(
         "{\"title\":\"Bitcoin\",\"value\":\"$95,240\","
-        "\"alert\":{\"led\":\"00FF80\",\"sound\":\"beep\",\"volume\":128}}"));
+        "\"alert\":{\"led\":\"00FF80\",\"brightness\":64,\"sound\":\"beep\",\"volume\":128}}"));
     TEST_ASSERT_TRUE(P.has_text);
     TEST_ASSERT_EQUAL_STRING("Bitcoin", P.title);
     TEST_ASSERT_EQUAL_STRING("$95,240", P.value);
@@ -26,10 +26,32 @@ void test_full_payload(void) {
     TEST_ASSERT_EQUAL_UINT8(0x00, P.r);
     TEST_ASSERT_EQUAL_UINT8(0xFF, P.g);
     TEST_ASSERT_EQUAL_UINT8(0x80, P.b);
+    TEST_ASSERT_TRUE(P.has_brightness);
+    TEST_ASSERT_EQUAL_UINT8(64, P.brightness);
     TEST_ASSERT_TRUE(P.has_volume);
     TEST_ASSERT_EQUAL_UINT8(128, P.volume);
     TEST_ASSERT_EQUAL(SOUND_BEEP, P.sound);
     TEST_ASSERT_EQUAL_STRING("", ERR);
+}
+
+void test_brightness(void) {
+    // Brightness alone is a recognised field (sticky, like volume): no colour needed.
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"alert\":{\"brightness\":0}}"));
+    TEST_ASSERT_TRUE(P.has_brightness);
+    TEST_ASSERT_EQUAL_UINT8(0, P.brightness);
+    TEST_ASSERT_FALSE(P.has_led);
+    TEST_ASSERT_EQUAL_STRING("", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"alert\":{\"brightness\":255}}"));
+    TEST_ASSERT_EQUAL_UINT8(255, P.brightness);
+    // Absent -> not set (the device keeps its current brightness).
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"alert\":{\"led\":\"FF0000\"}}"));
+    TEST_ASSERT_FALSE(P.has_brightness);
+    // Rejected like volume: integer 0..255 only, and the whole payload fails.
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"alert\":{\"brightness\":300}}"));
+    TEST_ASSERT_EQUAL_STRING("alert.brightness: out of range 0..255", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"alert\":{\"brightness\":-1}}"));
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"title\":\"x\",\"alert\":{\"brightness\":\"dim\"}}"));
+    TEST_ASSERT_EQUAL_STRING("alert.brightness: must be an integer 0..255", ERR);
 }
 
 void test_numbers_as_text_and_hash_prefix(void) {
@@ -269,6 +291,7 @@ int main(int, char**) {
     RUN_TEST(test_spark_edge_cases);
     RUN_TEST(test_nodered_appendix_a_shape);
     RUN_TEST(test_full_payload);
+    RUN_TEST(test_brightness);
     RUN_TEST(test_numbers_as_text_and_hash_prefix);
     RUN_TEST(test_presets_and_rtttl);
     RUN_TEST(test_unknown_sound_is_ignored_not_rejected);

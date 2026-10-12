@@ -8,6 +8,7 @@
 //   "value": "$95,240",            // string (or number), <= PAYLOAD_VALUE_MAX-1 chars
 //   "alert": {
 //     "led":    "00FF00",          // RRGGBB hex, optional leading '#'
+//     "brightness": 128,           // 0..255, scales the LED colour (kept until changed)
 //     "sound":  "beep",            // preset: beep | double_beep | long_beep | none, or RTTTL
 //     "volume": 128                // 0..255
 //   },
@@ -49,6 +50,9 @@ struct ScreenPayload {
 
     bool has_led;
     uint8_t r, g, b;
+
+    bool has_brightness;   // alert.brightness: scales the LED base colour, sticky like volume
+    uint8_t brightness;
 
     bool has_volume;
     uint8_t volume;

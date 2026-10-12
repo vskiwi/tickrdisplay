@@ -14,6 +14,7 @@
 static uint8_t _current_r = 0;       // base colour (the user's)
 static uint8_t _current_g = 0;
 static uint8_t _current_b = 0;
+static uint8_t _current_bri = 255;   // payload alert.brightness: scales the base colour only
 static uint8_t _current_volume = 255;
 // Overlay layer: bit (1 << priority) per active overlay; a one-shot flash above it.
 static uint16_t _overlays = 0;
@@ -56,7 +57,12 @@ static void refresh() {
         case LED_OVL_BATT_EMPTY:
         case LED_OVL_BATT_LOW: write_rgb(0, 0, 0); break;
         case LED_OVL_OFFLINE:  w = (now % 10000u) < 200u; write_rgb(w ? 255 : 0, w ? 120 : 0, 0); break;
-        default:               write_rgb(_current_r, _current_g, _current_b); break;
+        default:               // base colour, scaled by the brightness (on the intuitive
+                               // 0..255 values - write_rgb() inverts for the active-LOW pins)
+            write_rgb((uint8_t)((_current_r * _current_bri + 127u) / 255u),
+                      (uint8_t)((_current_g * _current_bri + 127u) / 255u),
+                      (uint8_t)((_current_b * _current_bri + 127u) / 255u));
+            break;
     }
 }
 
@@ -114,6 +120,16 @@ void indication_get_rgb(uint8_t* r, uint8_t* g, uint8_t* b) {
     if (r) *r = _current_r;
     if (g) *g = _current_g;
     if (b) *b = _current_b;
+}
+
+void indication_set_brightness(uint8_t bri) {
+    if (bri == _current_bri) return;
+    _current_bri = bri;
+    refresh();
+}
+
+uint8_t indication_brightness() {
+    return _current_bri;
 }
 
 void indication_get_written_rgb(uint8_t* r, uint8_t* g, uint8_t* b) {

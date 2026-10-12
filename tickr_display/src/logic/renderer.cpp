@@ -45,6 +45,11 @@ void renderer_apply(const ScreenPayload& p) {
     if (p.has_volume) {
         indication_set_volume(p.volume);
     }
+    // Order volume -> brightness -> LED -> sound -> screen (docs/API.md "Payload format"):
+    // the brightness is in place before the colour is written.
+    if (p.has_brightness) {
+        indication_set_brightness(p.brightness);
+    }
     uint8_t r, g, b;
     if (ticker_led_decide(s_led_rule, p.has_led, p.r, p.g, p.b, p.has_dir, p.dir, &r, &g, &b)) {
         indication_led_rgb(r, g, b);

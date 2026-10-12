@@ -98,6 +98,21 @@ static bool parse_volume(JsonVariantConst v, ScreenPayload* out, char* err, size
     return true;
 }
 
+static bool parse_brightness(JsonVariantConst v, ScreenPayload* out, char* err, size_t err_len) {
+    if (!v.is<long>()) {
+        set_err(err, err_len, "alert.brightness: must be an integer 0..255");
+        return false;
+    }
+    long bri = v.as<long>();
+    if (bri < 0 || bri > 255) {
+        set_err(err, err_len, "alert.brightness: out of range 0..255");
+        return false;
+    }
+    out->has_brightness = true;
+    out->brightness = (uint8_t)bri;
+    return true;
+}
+
 static bool parse_sound(JsonVariantConst v, ScreenPayload* out, char* err, size_t err_len) {
     if (!v.is<const char*>()) {
         set_err(err, err_len, "alert.sound: must be a string");
@@ -183,10 +198,15 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
         }
         JsonObjectConst a = alert.as<JsonObjectConst>();
         JsonVariantConst led = a["led"];
+        JsonVariantConst bri = a["brightness"];
         JsonVariantConst vol = a["volume"];
         JsonVariantConst snd = a["sound"];
         if (!led.isNull()) {
             if (!parse_led(led, out, err, err_len)) return PAYLOAD_ERR_FIELD;
+            recognised++;
+        }
+        if (!bri.isNull()) {
+            if (!parse_brightness(bri, out, err, err_len)) return PAYLOAD_ERR_FIELD;
             recognised++;
         }
         if (!vol.isNull()) {

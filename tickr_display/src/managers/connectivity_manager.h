@@ -78,10 +78,13 @@ private:
     bool _tls_insecure_used = false;
     char _last_error[96] = "";
 
-    // POST /api/source/test: the paused request and the plan to fetch (main task).
+    // POST /api/source/test and POST /api/pull/test: the paused request and
+    // what to fetch (main task) - one test at a time, of either kind.
     volatile bool _test_pending = false;
+    bool _test_pull = false;              // true: Pull URL test (_test_url), else the ticker plan
     bool _test_custom = false;
     SourcePlan _test_plan = {};
+    char _test_url[128] = "";             // sizeof(AppConfig::pull_url)
     AsyncWebServerRequestPtr _test_req;
 
     bool wait_for_sta(uint32_t timeout_ms);
@@ -112,7 +115,9 @@ private:
     bool fetch_source(const SourcePlan& plan, bool custom, SourceResult* res, char* err, size_t err_len, uint32_t* ms);
     bool fetch_ticker();
     void handle_source_test(AsyncWebServerRequest* request);
+    void handle_pull_test(AsyncWebServerRequest* request);
     void run_source_test();
+    void run_pull_test();
     bool fetch_grid();
     void parse_source_params(AsyncWebServerRequest* request, SourceSpec& tk, String& err, uint8_t idx, bool must_resolve);
 };

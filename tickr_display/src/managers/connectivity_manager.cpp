@@ -934,6 +934,8 @@ void ConnectivityManager::setup_webserver() {
     server.on("/api/config", HTTP_GET, [this](AsyncWebServerRequest* request) { handle_config_api(request); });
     // Ticker source test: one fetch with the posted source, answered from the main task.
     server.on("/api/source/test", HTTP_POST, [this](AsyncWebServerRequest* request) { handle_source_test(request); });
+    // Pull URL test: one GET of the posted URL through the payload parser, answered from the main task.
+    server.on("/api/pull/test", HTTP_POST, [this](AsyncWebServerRequest* request) { handle_pull_test(request); });
     server.on("/api/status", HTTP_GET, [this](AsyncWebServerRequest* request) { handle_status(request); });
 
     // --- Hardware test API: every handler only enqueues a command ---------
@@ -1116,6 +1118,7 @@ void ConnectivityManager::loop() {
     // written; the outage timers keep running.
     wifi_link_loop(wifi_portal_ap_up() || ota_update_in_progress() || ota_arduino_in_progress());
     run_source_test();   // a paused POST /api/source/test, if any (blocks like a scheduled pull)
+    run_pull_test();     // a paused POST /api/pull/test, likewise
     if (_mqtt_reconfigure) {
         _mqtt_reconfigure = false;
         if (mqtt.connected()) {
@@ -1294,6 +1297,30 @@ bool ConnectivityManager::fetch_pull_data() {
     bool ok = http_get_body(*pc.client, _config.pull_url, buf, &got);
     if (ok) {
         LOGV("Pull success (%u bytes)\n", (unsigned)got);
+        // The body must be a payload (docs/API.md "Payload format"). A body the
+        // parser rejects is a failed pull like an HTTP error: the reason goes
+        // to status.last_error ("pull: root must be a JSON object"), the
+        // scheduler backs off, nothing is drawn. Validated here, before the
+        // renderer, so the verdict is known to the caller; the renderer parses
+        // once more when it applies the payload.
+        ScreenPayload* p = (ScreenPayload*)malloc(sizeof(ScreenPayload));
+        char err[sizeof(_last_error) - 6] = "";   // "pull: " + err fits last_error
+        if (!p) {
+            setLastError("pull: out of memory");
+            ok = false;
+        } else {
+            PayloadResult r = payload_parse(buf, got, p, err, sizeof(err));
+            free(p);
+            if (r != PAYLOAD_OK) {
+                char msg[sizeof(_last_error)];
+                snprintf(msg, sizeof(msg), "pull: %s", err);
+                setLastError(msg);
+                Serial.printf("Pull: payload rejected (%s): %s\n", payload_result_str(r), err);
+                ok = false;
+            }
+        }
+    }
+    if (ok) {
         // A "pull: ..." entry in status.last_error is over once a later pull
         // succeeds; errors of other sources (MQTT, a rejected push) stay.
         if (strncmp(_last_error, "pull:", 5) == 0) _last_error[0] = '\0';
@@ -1566,15 +1593,22 @@ void ConnectivityManager::handle_source_test(AsyncWebServerRequest* request) {
     }
     source_resolve(s, &_test_plan);   // validated by parse_source_params
     _test_custom = s.preset == SRC_PRESET_CUSTOM;
+    _test_pull = false;
     _test_req = request->pause();
     _test_pending = true;
 }
 
 void ConnectivityManager::run_source_test() {
-    if (!_test_pending) return;
-    _test_pending = false;
+    if (!_test_pending || _test_pull) return;
+    // _test_pending stays set until the answer is out: it is the 409 guard of
+    // both handlers, which run on the async_tcp task while this fetch blocks.
     SourceResult* res = (SourceResult*)malloc(sizeof(SourceResult));
-    if (!res) return;
+    if (!res) {
+        if (auto req = _test_req.lock()) send_json_error(req.get(), 500, "out of memory");
+        _test_req.reset();
+        _test_pending = false;
+        return;
+    }
     char err[SRC_ERR_MAX + 8] = "no wifi";
     uint32_t ms = 0;
     bool ok = WiFi.isConnected() && fetch_source(_test_plan, _test_custom, res, err, sizeof(err), &ms);
@@ -1596,6 +1630,90 @@ void ConnectivityManager::run_source_test() {
     if (auto req = _test_req.lock()) req->send(200, JSON_CT, body);
     else Serial.println("Source test: client gone");
     _test_req.reset();
+    _test_pending = false;
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/pull/test - one GET of the posted (unsaved) Pull URL through the
+// payload parser, the Custom JSON URL editor's Test button (docs/WEB_UI.md
+// "Change what a device shows"). Form parameter `pull_url`; same transport as
+// the scheduled pull (TLS_LEGACY: the uploaded CA, else unverified). Paused and
+// answered from the main task like the ticker test (run_pull_test()):
+//   {"ok":true,"title":"Bitcoin","value":"$95,240","layout":"text","bytes":73,"url":"...","ms":412}
+//   {"ok":false,"error":"root must be a JSON object","url":"...","ms":398}
+// `layout` is what the payload would select: "ticker" (change / spark present)
+// or "text". Nothing is drawn, nothing is saved; a parser warning (an unknown
+// sound) comes back as "warning". 409 while another test runs.
+// ---------------------------------------------------------------------------
+void ConnectivityManager::handle_pull_test(AsyncWebServerRequest* request) {
+    REQUIRE_AUTH(request);
+    if (_test_pending) {
+        send_json_error(request, 409, "a source test is already running");
+        return;
+    }
+    String err;
+    _test_url[0] = '\0';
+    copy_field(request, "pull_url", _test_url, sizeof(_test_url), false, err);
+    if (err.length() == 0 && !_test_url[0]) err = "pull_url: required. ";
+    if (err.length() == 0 &&
+        strncasecmp(_test_url, "http://", 7) != 0 && strncasecmp(_test_url, "https://", 8) != 0) {
+        err = "pull_url: must start with http:// or https://. ";
+    }
+    if (err.length() > 0) {
+        send_json_error(request, 400, err.c_str());
+        return;
+    }
+    _test_pull = true;
+    _test_req = request->pause();
+    _test_pending = true;
+}
+
+void ConnectivityManager::run_pull_test() {
+    if (!_test_pending || !_test_pull) return;
+    // _test_pending stays set until the answer is out (409 guard, see run_source_test()).
+    uint32_t t0 = millis();
+    char err[96] = "no wifi";
+    bool ok = false;
+    String body;
+    char* buf = nullptr;
+    ScreenPayload* p = nullptr;
+    if (WiFi.isConnected()) {
+        PullClient pc;
+        buf = (char*)malloc(PAYLOAD_MAX_LEN + 1);
+        p = (ScreenPayload*)malloc(sizeof(ScreenPayload));
+        if (!buf || !p) {
+            strlcpy(err, "out of memory", sizeof(err));
+        } else if (open_client(pc, strncasecmp(_test_url, "https://", 8) == 0, TLS_LEGACY)) {
+            size_t got = 0;
+            if (http_get_body(*pc.client, _test_url, buf, &got)) {
+                PayloadResult r = payload_parse(buf, got, p, err, sizeof(err));
+                ok = r == PAYLOAD_OK;
+                if (ok) {
+                    body = "{\"ok\":true,\"title\":\"" + json_escape(p->title) +
+                           "\",\"value\":\"" + json_escape(p->value) +
+                           "\",\"layout\":\"" + (p->has_change || p->spark_n > 0 ? "ticker" : "text") +
+                           "\",\"bytes\":" + String((unsigned)got);
+                    if (err[0]) body += ",\"warning\":\"" + json_escape(err) + "\"";
+                }
+            } else {
+                // http_get_body stored "pull: <reason>" - the Test answer shows the reason alone
+                strlcpy(err, strncmp(_last_error, "pull: ", 6) == 0 ? _last_error + 6 : _last_error, sizeof(err));
+            }
+        } else {
+            strlcpy(err, strncmp(_last_error, "pull: ", 6) == 0 ? _last_error + 6 : _last_error, sizeof(err));
+        }
+    }
+    free(buf);
+    free(p);
+    // the test's own transport failure must not linger as the device's last_error
+    if (strncmp(_last_error, "pull:", 5) == 0) _last_error[0] = '\0';
+    if (!ok) body = "{\"ok\":false,\"error\":\"" + json_escape(err) + "\"";
+    body += ",\"url\":\"" + json_escape(_test_url) + "\",\"ms\":" + String((unsigned long)(millis() - t0)) + "}";
+    if (auto req = _test_req.lock()) req->send(200, JSON_CT, body);
+    else Serial.println("Pull test: client gone");
+    _test_req.reset();
+    _test_pull = false;
+    _test_pending = false;
 }
 
 // For /api/screen/state (additive): the configured pull target and, for

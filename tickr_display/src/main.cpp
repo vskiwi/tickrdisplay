@@ -196,12 +196,14 @@ static void refresh_shown_status() {
 
 // Deep sleep with the LED pins held dark - or, with `led_battery = hold` and
 // the level at or above LED_BATTERY_MIN_PCT, at the base colour (full on per
-// channel; docs/DEVICE_UI.md "LED and sound").
+// channel; docs/DEVICE_UI.md "LED and sound"). A brightness of 0 (the LED
+// dark while awake) holds nothing: the pads must not light up in the sleep.
 static void battery_sleep_minutes(uint32_t minutes) {
     Serial.printf("Entering Deep Sleep for %u minutes (fails=%u)\n", minutes, rtc_fail_count);
     rtc_slept_min += minutes;
     uint8_t r, g, b, hr, hg, hb;
     indication_get_rgb(&r, &g, &b);
+    if (indication_brightness() == 0) r = g = b = 0;
     if (led_battery_hold(cm.getConfig().led_battery, shown_status.batt_known, shown_status.batt_pct, r, g, b, &hr, &hg, &hb))
         Serial.printf("LED: held %u/%u/%u through the sleep (%u%%)\n", hr, hg, hb, shown_status.batt_pct);
     display_prepare_sleep();

@@ -8,8 +8,14 @@ void indication_init(uint8_t r, uint8_t g, uint8_t b);
 // written to the LEDs unless an overlay is active (docs/DEVICE_UI.md "LED and sound").
 void indication_led(bool r, bool g, bool b);
 void indication_led_rgb(uint8_t r, uint8_t g, uint8_t b);
-// The base colour (as set above; not what an active overlay shows).
+// The base colour (as set above; not what an active overlay shows, and not
+// scaled by the brightness).
 void indication_get_rgb(uint8_t* r, uint8_t* g, uint8_t* b);
+// Brightness 0..255 (payload alert.brightness, default 255): a linear scale
+// applied to the base colour when it is written. Kept until changed; overlays
+// and flashes are not scaled. Not held through deep sleep (no PWM there).
+void indication_set_brightness(uint8_t bri);
+uint8_t indication_brightness();
 // The colour actually driven to the LEDs right now - flash / overlay / base,
 // whichever is on top (what /api/status reports as `led`).
 void indication_get_written_rgb(uint8_t* r, uint8_t* g, uint8_t* b);
