@@ -216,6 +216,10 @@ the grid view is the single look of §4.
   `layout: "grid"` with `symbols[]` and `shorts[]`. Rows beyond `tk_n`
   are kept until the next save of the ticker source. *Test* tests one row
   at a time.
+* **From a proxy or your own server**: the same cells – and other splits
+  of the panel – are available to a payload through `tiles`
+  ([`API.md`](API.md) → *Tile layouts*; `"look": "ticker"` draws this
+  grid's cell), with the sender choosing which cells are filled.
 
 ## 6. Sparkline history
 

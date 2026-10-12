@@ -53,6 +53,9 @@ The smallest valid document is `{"value": "hello"}`.
 | `alert.brightness` | integer | 0–255 | Scales the LED colour per channel (`c × brightness / 255`) – an explicit `alert.led` as well as the automatic red/green by sign. Default 255. `0` keeps the colour dark but remembered (a later non-zero value restores it). A float or an out-of-range value is rejected |
 | `alert.sound` | string | preset or RTTTL ≤ 1023 bytes | `beep` · `double_beep` · `long_beep` · `none` · `""`, or an RTTTL melody. An unknown string is *ignored with a warning* – the rest of the payload is still applied |
 | `alert.volume` | integer | 0–255 | Amplitude for this and later sounds. A float or an out-of-range value is rejected |
+| `tiles` | array of ≤ 4 | object · `null` · `{}` per cell | Several coins in one frame – see [Several coins at once: tile layouts](#several-coins-at-once-tile-layouts). A tile = `title` (≤ 15 printable ASCII), `value` (≤ 23 bytes), `change` (≤ 15 bytes), `dir`, optional `style` |
+| `layout` | string | `single` · `1x1` · `1x2` · `2x1` · `2x2` | The tile preset; `single` (the default) is the only value without `tiles` |
+| `style`, `status` | object, boolean | `{"look","size","invert"}`, `true`/`false` | Tile defaults and the status band ([`API.md`](API.md) → *Tile layouts*) |
 
 Notes on types:
 
@@ -71,7 +74,7 @@ Notes on types:
   `round(pct * 255 / 100)` – 50 % is `128`.
 * Only `change` and `spark` select the ticker layout. A payload with just
   `title` / `value` keeps the text look; `short` and `dir` alone do not
-  change the look.
+  change the look. `tiles` selects a tile layout and wins over both.
 * An explicit `alert.led` always wins. Without one, the device's own *LED
   rule* setting (`sign`) colours the LED red/green by `dir`; with the
   default `off` the LED is left as it was.
@@ -87,7 +90,7 @@ see in `last_error` (`GET /api/status`) and in the error body of
 |---|---|---|
 | `[{"text": "BTC", "val": "+31%"}]` – an array, even with one element | `root must be a JSON object` | Return the object itself, not a list around it |
 | `[]` – "nothing to show" | `root must be a JSON object` | Return an *idle* object: `{"title":"Movers","value":"nothing above +30%"}` |
-| `{}` or `{"text": "...", "val": "..."}` – only unknown keys | `no recognised fields (title, value, alert, change, dir, age_s, time, spark, short)` | Use the field names from the table; at least one |
+| `{}` or `{"text": "...", "val": "..."}` – only unknown keys | `no recognised fields (title, value, alert, change, dir, age_s, time, spark, short, layout, tiles, style, status)` | Use the field names from the table; at least one |
 | `"hello"`, `42`, `null` | `root must be a JSON object` | Wrap it: `{"value": "hello"}` |
 | Not JSON (HTML error page, trailing comma, single quotes) | `invalid JSON: <parser detail>` | Send `application/json` with double quotes and no comments |
 | A body over 4096 bytes | `payload too large (max 4096 bytes)` (push, `413`) · `response too large` (pull) | Shorten `value`, trim `spark` to 48 points |
@@ -103,6 +106,12 @@ see in `last_error` (`GET /api/status`) and in the error body of
 | `"spark": "1,2,3"` | `spark: must be an array of numbers` | `[1, 2, 3]` |
 | `"short": "Bitcoin!"` / `"short": "БТК"` | `short: printable ASCII, up to 7 chars` | `"BTC"` |
 | `"sound": "ding"` | *not rejected* – `alert.sound ignored: unknown preset or invalid RTTTL` | One of the presets or valid RTTTL |
+| `"tiles": {"title": "BTC"}` / five elements | `tiles: must be an array of up to 4 tiles` · `tiles: more than 4` | An array of at most four cells; `tiles: more than 2 for layout 1x2` when the preset is smaller |
+| `"tiles": [{"title":"A"}, "B"]` | `tiles[1]: must be an object or null` | Objects, `null` or `{}` only |
+| A tile `title` of 16+ chars, `"БТК"` / a `value` of 24+ bytes | `tiles[2].title: too long` · `tiles[0].title: printable ASCII only` · `tiles[0].value: too long` | Shorten on your side |
+| `"layout": "grid"` / `"layout": "2x2"` without `tiles` / `"layout": "single"` with `tiles` | `layout: expected single\|1x1\|1x2\|2x1\|2x2` · `layout: 2x2 needs tiles` · `layout: single cannot carry tiles` | A preset name next to `tiles`, or leave `layout` out |
+| `"style": "bold"` / `{"look": "big"}` / `{"size": "xl"}` / `{"invert": "yes"}` | `style: must be an object` · `style.look: expected stack\|row\|ticker` · `style.size: expected auto\|l\|m\|s` · `style.invert: must be true or false` (prefixed `tiles[N].` for a tile's own style) | The listed values; booleans as `true` / `false` |
+| `"value": "…"` next to `tiles` | *not rejected* – `value ignored: tiles present` | Drop the root `value` / `change` / `dir` / `spark` / `short` / `time`, or ignore the warning |
 
 Mistakes on the **Ticker → Custom JSON** path are different: the value at
 the price path must be a plain number – `"31.2"`, `31.2`, `"-0.5"` – and
@@ -148,6 +157,8 @@ pip install fastapi uvicorn requests
 TICKR_TOKEN=<token> THRESHOLD_PCT=10 LED_BRIGHTNESS=128 uvicorn pull_server:app --host 0.0.0.0 --port 8000
 curl -s "http://localhost:8000/tickr?token=<token>"
 # {"title":"XYZ +14.2%","value":"XYZ +14.2% | ABC +11.0%","change":"+14.2%","dir":1,"alert":{"led":"00FF00","sound":"double_beep","brightness":128}}
+# with GRID=1 in the environment: the top four as tiles (see "Several coins at once: tile layouts")
+# {"layout":"2x2","style":{"look":"stack","size":"auto"},"tiles":[{"title":"XYZ","value":"0.293","change":"+14%"},{"title":"ABC","value":"1.52","change":"+11%"},null,null],"title":"Binance movers","alert":{"led":"00FF00","brightness":128}}
 ```
 
 ```python
@@ -160,7 +171,12 @@ Built from the Binance USDT-margined futures 24 h tickers: every pair whose
     pip install fastapi uvicorn requests
     TICKR_TOKEN=<token> THRESHOLD_PCT=10 uvicorn pull_server:app --host 0.0.0.0 --port 8000
 
-Device: Source = Custom JSON URL, URL = http://<server-host>:8000/tickr?token=<token>
+    Device: Source = Custom JSON URL, URL = http://<server-host>:8000/tickr?token=<token>
+
+GRID=1 sends the top four movers as a 2x2 tile frame instead of one text /
+ticker frame (docs/API.md "Tile layouts"): one tile per coin, the cells of
+coins below the threshold left empty (null). The server picks the tiles,
+the device draws them.
 """
 import os
 import threading
@@ -180,9 +196,14 @@ REFRESH_S = int(os.environ.get("REFRESH_S", "60"))
 LED_BRIGHTNESS = max(0, min(255, int(os.environ.get("LED_BRIGHTNESS", "255"))))
 # EDIT: any JSON API; change fetch_rows() to match its shape.
 SOURCE_URL = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+# EDIT: GRID=1 -> a 2x2 of tiles (up to four coins), else one frame with the strongest mover.
+GRID = os.environ.get("GRID", "0") == "1"
+# EDIT: the tile style (GRID=1): look stack|row|ticker, size auto|l|m|s, invert true|false.
+TILE_STYLE = {"look": "stack", "size": "auto"}
 
-# Firmware limits (tickr_display/src/logic/payload.h): bytes, not characters.
+# Firmware limits (tickr_display/src/logic/payload.h, tiles.h): bytes, not characters.
 TITLE_MAX, VALUE_MAX, CHANGE_MAX = 63, 127, 15
+TILE_TITLE_MAX, TILE_VALUE_MAX = 15, 23
 
 app = FastAPI()
 _lock = threading.Lock()
@@ -196,7 +217,7 @@ def cut(text: str, limit: int) -> str:
 
 
 def fetch_rows():
-    """[(symbol, pct), ...] above the threshold, strongest first."""
+    """[(symbol, pct, last_price), ...] above the threshold, strongest first."""
     r = requests.get(SOURCE_URL, timeout=10, headers={"Accept": "application/json"})
     r.raise_for_status()
     rows = []
@@ -206,26 +227,60 @@ def fetch_rows():
             continue
         try:
             pct = float(t["priceChangePercent"])
+            last = str(t.get("lastPrice", ""))
         except (KeyError, TypeError, ValueError):
             continue
         if pct >= THRESHOLD_PCT:
-            rows.append((sym[:-4], pct))
+            rows.append((sym[:-4], pct, last))
     rows.sort(key=lambda x: x[1], reverse=True)
     return rows
 
 
+def tile_price(last: str) -> str:
+    """A short price for a 148 px cell: the bottom row of a tile holds about
+    7 characters of value next to a 4-5 character change (docs/API.md "Tile layouts")."""
+    try:
+        p = float(last)
+    except ValueError:
+        return last
+    if p >= 1000:
+        return f"{p:.0f}"           # 80000
+    if p >= 1:
+        return f"{p:.2f}"           # 185.20
+    return f"{p:.3g}"               # 0.00237
+
+
+def build_tiles(rows) -> dict:
+    """GRID=1: the top four as a 2x2; cells without a mover stay empty (null).
+    A tile is title / value / change (+ dir, derived from the sign); the device
+    picks the font sizes. All-empty tiles draw a blank grid - still one object."""
+    tiles = [None, None, None, None]
+    for i, (sym, pct, last) in enumerate(rows[:4]):
+        tiles[i] = {"title": cut(sym, TILE_TITLE_MAX), "value": cut(tile_price(last), TILE_VALUE_MAX),
+                    "change": cut(f"+{pct:.0f}%", CHANGE_MAX)}
+    return {
+        "layout": "2x2",
+        "style": TILE_STYLE,
+        "tiles": tiles,
+        "title": "Binance movers",            # the shelf's Showing line only
+        "alert": {"led": "00FF00" if rows else "000000", "brightness": LED_BRIGHTNESS},
+    }
+
+
 def build_payload(rows) -> dict:
     """Always ONE object - never a list, never {} - even when there is nothing to show."""
+    if GRID:
+        return build_tiles(rows)
     if not rows:
         # EDIT: what the panel shows while nothing passes the threshold.
         return {"title": "Binance movers",
                 "value": cut(f"nothing above +{THRESHOLD_PCT:g}%", VALUE_MAX),
                 "alert": {"led": "000000"}}
-    sym, pct = rows[0]
+    sym, pct, _ = rows[0]
     # EDIT: the text lines. `change` + `dir` switch the panel to the ticker look.
     return {
         "title": cut(f"{sym} +{pct:.1f}%", TITLE_MAX),
-        "value": cut(" | ".join(f"{s} +{p:.1f}%" for s, p in rows), VALUE_MAX),
+        "value": cut(" | ".join(f"{s} +{p:.1f}%" for s, p, _ in rows), VALUE_MAX),
         "change": cut(f"+{pct:.1f}%", CHANGE_MAX),
         "dir": 1,
         # EDIT: RRGGBB, beep|double_beep|long_beep|none. brightness is sticky on the device but
@@ -291,6 +346,419 @@ curl -X POST "http://<device-ip>/api/screen" -u ":<token>" \
 The same object published to the MQTT topic (default `tickr/display`) has
 the same effect on a USB-powered device.
 
+## Several coins at once: tile layouts
+
+One `value` with every mover joined by `|` is cut to what fits one line.
+For more than one coin send **tiles**: the panel is split into cells and
+every cell shows one item – a big name, the price under it, the change
+with its triangle at the right. The rule of the split: **you choose the
+tiles, the device draws them.** Your script decides which cells are filled
+and in what order; the firmware owns the placement and the font sizes.
+The field-by-field reference, the exact limits, the font ladders and the
+rejection texts are in [`API.md`](API.md) → *Tile layouts*; this section
+shows what to send and what you will see.
+
+### The shape of a tile payload
+
+```json
+{"layout": "2x2",
+ "style": {"look": "stack", "size": "auto", "invert": false},
+ "tiles": [
+   {"title": "BTC", "value": "80000", "change": "+15%", "dir": 1, "style": {"invert": true}},
+   {"title": "ETH", "value": "4100",  "change": "+12.3%"},
+   null,
+   {}],
+ "status": true,
+ "title": "Movers",
+ "age_s": 20,
+ "alert": {"led": "00FF00", "brightness": 128, "sound": "beep"}}
+```
+
+* **`tiles`** (required for a tile frame): an array of **up to four**
+  elements, one per cell, in reading order – top-left, top-right,
+  bottom-left, bottom-right. An element is a **tile object**, or `null` /
+  `{}` for an **empty cell**; a shorter array leaves the remaining cells
+  empty. `[null, null, null, null]` draws a blank frame – still one object,
+  never `[]`.
+* A **tile** has the field names you already know: `title` (≤ 15
+  printable ASCII characters – the big text), `value` (≤ 23 bytes),
+  `change` (≤ 15 bytes, drawn with its triangle), `dir` (`1` / `0` / `-1`
+  or `"up"` / `"flat"` / `"down"`; derived from the sign of `change` when
+  absent) and an optional `style`. A tile with none of `title`, `value`,
+  `change` is an empty cell.
+* **`layout`**: `2x2` (four cells of 148×64), `1x2` (two tall columns of
+  148×128), `2x1` (two wide rows of 296×64), `1x1` (one cell over the
+  whole 296×128 panel). Optional: without it one tile → `1x1`, two →
+  `1x2`, anything else → `2x2`. `single` means "no tiles" and is only
+  valid without them.
+* **`style`** at the root = defaults for every cell; `style` inside a tile
+  = overrides for that cell. Keys: `look` (`stack` · `row` · `ticker`),
+  `size` (`auto` · `l` · `m` · `s`), `invert` (`true` · `false`). Every key
+  is optional at both levels; the defaults are `stack`, `auto`, `false`.
+* **`status`**: `true` (default) keeps the Wi-Fi / power badges and the
+  age line in the lowest 16 rows of the bottom-right cell; `false` drops
+  them and gives that cell its full height.
+* The root **`title`** is only what the web UI's *Showing* line says
+  (without it: the tile titles joined); **`age_s`** feeds the age line;
+  **`alert`** works as always – the LED rule `sign` follows the **first**
+  tile. The root `value`, `change`, `dir`, `time`, `spark` and `short` are
+  **ignored** next to `tiles` (the answer carries
+  `"warning": "value ignored: tiles present"`); the frame is still drawn.
+* Everything else about a payload still holds: one JSON object, ≤ 4096
+  bytes, printable ASCII, numbers rendered with 6 significant digits –
+  format on your side and send strings.
+
+### The three looks
+
+What goes where in a cell. Sizes are what the device picks for a 148 px
+cell with short texts; it goes one step smaller whenever a text does not
+fit.
+
+**`stack`** (default) – the title large in the upper band; the value
+bottom-left and the change with its triangle bottom-right. In a 64 px cell
+(`2x2`, the rows of a `2x1`) two bands; in a tall cell (`1x2`, `1x1`)
+three – title, value, change – one under the other, the value and the
+change at 18 pt:
+
+```
+148 x 64 (2x2 cell)              148 x 128 (1x2 column)
++----------------------+         +----------------------+
+| BTC                  |  title  | BTC                  |  title   12 pt x2
+| 81250      ^ +16.2%  |  row    | 80000                |  value   18 pt
++----------------------+         |             ^ +15%   |  change  18 pt
+  value 12 pt   change 12 pt     |                      |
+                                 +----------------------+
+```
+
+**`row`** – one line: the title at the left, the value and the change
+right-aligned. Made for the 296 px rows of a `2x1` (and a `1x1`); in a
+148 px cell the three texts share 140 px and the value is the one cut:
+
+```
+296 x 64 (2x1 row)
++--------------------------------------------------+
+| BTC                           80000   ^ +15%     |   12 pt x2 / 18 pt / 12 pt
++--------------------------------------------------+
+```
+
+**`ticker`** – the cell of the device's own 2×2 ticker grid: the title
+white on a black badge top-left, the change with its triangle at the right
+of the badge row, the value right-aligned below. Always drawn in the top
+46 rows of the cell, so it is made for the `2x2`:
+
+```
+148 x 64
++----------------------+
+|[BTC]        ^ +0.9%  |   badge 12 pt, change 9 pt
+|            2 530.43  |   value 18 pt, right-aligned
++----------------------+
+```
+
+**The status band** sits in the bottom-right cell of every preset unless
+`"status": false`. That cell is 16 rows shorter: in a `2x2` or the lower
+row of a `2x1` its `stack` bottom row is 9 pt (the title stays 18 pt), in
+a `1x2` or `1x1` the bands are laid out from this shorter height – the two
+columns of a `1x2` therefore align:
+
+```
+147 x 63 bottom-right cell of a 2x2, status band on
++----------------------+
+| DOGE                 |   title 18 pt
+| 0.2531     ^ +9.8%   |   value / change 9 pt
+| just now          /| |   the band: age line left, badges right
++----------------------+
+```
+
+**`invert: true`** fills the cell black and draws every element white
+(the badge of the `ticker` look becomes a white field with black text);
+the status band stays white. Use it to single out one cell – the top
+mover, a breached threshold.
+
+### Keeping the text short
+
+The device never overflows a cell: a text that does not fit at the largest
+size is drawn smaller, and a text that does not fit at 9 pt is cut with
+`...`. What stays large ([`API.md`](API.md) → *Fonts and fitting* has the
+full table):
+
+| Where | Title stays at the largest size with | On the value / change row |
+|---|---|---|
+| A 148 px cell of a `2x2` (top cells, bottom-left; every cell with `status: false`) | **≤ 4 capitals** (`DOGE`), 5 digits; `MATIC` drops one step | **5 digits of value at 12 pt next to a 4-character change** (`80000` · `+15%`); a 6-character change (`+12.3%`) pulls both to 9 pt; 6–7 characters of value fit at 9 pt |
+| The bottom-right cell of a `2x2` with the band (147×47) | ≤ 5 capitals at 18 pt | 9 pt from the start: 6 digits next to `+15%`, 5 next to `+12.3%`; a 7-character change (`-12.34%`) leaves room for 5 characters of value |
+| A `1x2` column | ≤ 4 capitals (≤ 2 at 18 pt ×2 with `status: false`) | the value alone: **7 digits at 18 pt**; a change of up to 6 characters stays at 18 pt, `-12.34%` drops to 12 pt |
+| A 296 px row (`2x1`, `1x1`) | ≤ 8 capitals (≤ 5 at 18 pt ×2 with `status: false` in a `1x1`) | `row` look: `BTC 80000 +15%` as 12 pt ×2 / 18 / 12; a 6-character change drops to 9 pt, a 7-character one pulls the value to 12 pt. `stack` look: 13 digits next to `-12.34%` at 12 pt |
+
+Rules of thumb for a sender:
+
+* **Round the change to what matters**: `+15%` or `+9.8%` rather than
+  `+14.62%`. The change shrinks first when a row is tight, and in the
+  bottom-right cell of a `2x2` (the smallest one) every character of
+  `change` is a character less of `value` – `"-12.34%"` next to a 7-digit
+  price shows `0.25...`. Put the item whose price matters least in that
+  cell, or send `"status": false` to make the four cells equal (and lose
+  the badges and the age line).
+* **Shorten the price to the cell**: ≥ 1000 → no decimals (`80000`),
+  ≥ 1 → two decimals (`185.20`), below → three significant digits
+  (`0.00237`). The example server's `tile_price()` does exactly this.
+* **Titles of 3–4 capitals** stay at the largest size in a 148 px cell;
+  `MATIC` and `PEPEUSDT` are drawn one and two steps smaller, a 15-character
+  title ends up at 9 pt with `...`.
+* Values and changes **can change freely** between payloads – the device
+  redraws them with a partial refresh. Adding, removing or renaming a
+  tile, or toggling `invert` / `status` / the preset, is a full refresh
+  (an inversion flash), so keep the set of cells stable while the numbers
+  move ([`DEVICE_UI.md`](DEVICE_UI.md) → *E-ink refresh rules*).
+
+### Worked examples
+
+Each one is a complete body for `POST /api/screen` or a complete Pull URL
+response. The line under it says what the panel shows.
+
+**The pump case – the top movers above a threshold fill a `2x2` from the
+top left, the rest stays empty:**
+
+```json
+{"layout": "2x2",
+ "tiles": [
+   {"title": "BTC", "value": "80000",  "change": "+15%"},
+   {"title": "ETH", "value": "4100",   "change": "+12.3%"},
+   {"title": "SOL", "value": "185.20", "change": "+10%"},
+   null],
+ "title": "Movers", "age_s": 5, "alert": {"led": "00FF00", "sound": "beep"}}
+```
+
+Three cells with a big name, the price and an up-triangle with the change
+on the bottom row; the bottom-right cell is blank but for the age line
+(*just now*) and the power badge; the LED green; the *Showing* line of the
+shelf says *Movers*.
+
+**A full `2x2` with the top mover inverted:**
+
+```json
+{"layout": "2x2",
+ "tiles": [
+   {"title": "BTC",  "value": "81250",  "change": "+16.2%", "style": {"invert": true}},
+   {"title": "ETH",  "value": "4180",   "change": "+13%"},
+   {"title": "SOL",  "value": "190.05", "change": "+11%"},
+   {"title": "DOGE", "value": "0.2531", "change": "+9.8%"}]}
+```
+
+Four cells; the top-left one black with white text and a white triangle,
+the others black on white. `DOGE` in the bottom-right cell is drawn at
+18 pt over a 9 pt row because the band takes its lowest rows; the other
+three titles at 12 pt ×2.
+
+**`1x2` – two coins large:**
+
+```json
+{"layout": "1x2",
+ "tiles": [
+   {"title": "BTC", "value": "80000",   "change": "+15%"},
+   {"title": "ETH", "value": "4100.55", "change": "-2.3%"}]}
+```
+
+Two columns with a 1 px line between them; in each, the name at 12 pt ×2,
+the price at 18 pt under it and the change at 18 pt with its triangle
+right-aligned under that – the rows of both columns at the same heights;
+the age line and the badge at the foot of the right column.
+
+**`2x1` – two rows in the `row` look:**
+
+```json
+{"layout": "2x1", "style": {"look": "row"},
+ "tiles": [
+   {"title": "BTC", "value": "80000",   "change": "+15%"},
+   {"title": "ETH", "value": "4100.55", "change": "-2.3%"}]}
+```
+
+Two lines over the full width – `BTC` left, `80000 ▲+15%` right on the
+upper one, `ETH … 4100.55 ▼-2.3%` on the lower one, each title at 12 pt
+×2, the price at 18 pt; the lower row ends above the age line and the
+badge.
+
+**`1x1` – one hero, no status band:**
+
+```json
+{"layout": "1x1", "status": false,
+ "tiles": [{"title": "BTC", "value": "80000.12", "change": "+15.3%", "style": {"invert": true}}]}
+```
+
+The whole panel black: `BTC` at 18 pt ×2 (52 px capitals), the price and
+the change at 18 pt under it, no badges, no age line. With `"status":
+true` the title would be 12 pt ×2 and the band white at the bottom.
+
+**The `ticker` look – the device's own grid, fed by you:**
+
+```json
+{"layout": "2x2", "style": {"look": "ticker"},
+ "tiles": [
+   {"title": "BTC", "value": "82 722",   "change": "-0.50%"},
+   {"title": "ETH", "value": "2 530.43", "change": "+0.90%"},
+   {"title": "SOL", "value": "109.07",   "change": "-0.63%"},
+   {"title": "BNB", "value": "746.64",   "change": "-0.46%"}]}
+```
+
+Pixel for pixel the built-in 2×2 ticker grid: a black name badge and the
+change at the top of every cell, the price right-aligned below – but with
+your prices and your formatting (the spaces are yours).
+
+**A blank frame – nothing qualifies right now:**
+
+```json
+{"layout": "2x2", "tiles": [null, null, null, null], "title": "Movers", "alert": {"led": "000000"}}
+```
+
+An empty grid: the two separators, the age line and the badge in the
+bottom-right cell, the LED off. Still one object – `[]` would be rejected
+with `root must be a JSON object`.
+
+**Root defaults with per-tile overrides:**
+
+```json
+{"layout": "2x2",
+ "style": {"look": "stack", "size": "m"},
+ "tiles": [
+   {"title": "BTC",  "value": "80000",  "change": "+15%", "style": {"invert": true, "size": "auto"}},
+   {"title": "ETH",  "value": "4100",   "change": "+12.3%"},
+   {"title": "SOL",  "value": "185.20", "change": "+10%", "style": {"look": "ticker"}},
+   {"title": "DOGE", "value": "0.2531", "change": "+9.8%", "style": {"invert": true}}]}
+```
+
+The root says *stack look, title at most 18 pt*; the first tile keeps the
+stack look but takes `size` back to `auto` (12 pt ×2) and inverts; the
+second is plain – 18 pt title, 12 pt row; the third is a ticker cell; the
+fourth inverts in the cramped bottom-right cell.
+
+**The same tile frame pushed with `curl`** (the device's API token, a
+`202` with the queue depth; a rejected body answers `400` with the reason
+text):
+
+```bash
+curl -X POST "http://<device-ip>/api/screen" -u ":<token>" \
+     -H 'Content-Type: application/json' \
+     -d '{"layout":"2x2","tiles":[{"title":"BTC","value":"80000","change":"+15%"},
+          {"title":"ETH","value":"4100","change":"+12.3%"},{"title":"SOL","value":"185.20","change":"+10%"},null],
+          "title":"Movers","alert":{"led":"00FF00"}}'
+# -> 202 {"status":"queued","queue":1}
+```
+
+**The same frame over MQTT** (the device's topic, default `tickr/display`;
+a USB-powered device):
+
+```bash
+mosquitto_pub -h <BROKER_HOST> -t tickr/display -m \
+  '{"layout":"2x2","tiles":[{"title":"BTC","value":"80000","change":"+15%"},
+    {"title":"ETH","value":"4100","change":"+12.3%"},{"title":"SOL","value":"185.20","change":"+10%"},null],
+    "title":"Movers","alert":{"led":"00FF00"}}'
+```
+
+The body is parsed exactly as over HTTP; a rejection is visible in
+`last_error` of `GET /api/status` only (there is no reply on MQTT).
+
+### Previewing a layout
+
+The device is the renderer: `POST` the candidate object to `/api/screen`
+and look at the device's card on the shelf page, or fetch
+`http://<device-ip>/api/screen.bmp` – that is exactly the frame on the
+e-ink. Iterate there before you change the server. `GET /api/screen/state`
+reports `layout` (the preset), `tiles` (filled cells), `status_band` and
+`symbols[]` (the titles in cell order); the Content editor's **Test**
+button shows `OK (2x2, 3 tiles, …)` for a URL that returns tiles. The
+example server above builds a tile frame with `GRID=1`.
+
+### Machine-readable contract
+
+The payload as a JSON Schema (draft-07). It follows the parser: limits are
+bytes (`maxLength`), `tiles` has at most four elements, each an object or
+`null`; a preset needs `tiles`, `single` cannot carry them, and an array
+may not have more tiles than the preset has cells. Three things the schema
+cannot say: unknown keys are ignored everywhere (so `additionalProperties`
+is left open); a root `value` / `change` / `dir` / `time` / `spark` /
+`short` next to `tiles` is accepted with a warning; and `integer` means an
+integer **literal** – the device rejects `1.0` for `dir`, `brightness` and
+`volume`, although JSON Schema counts it as an integer.
+
+```json
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TickrDisplay payload",
+  "description": "One JSON object for POST /api/screen, the MQTT topic or a Pull URL response. At least one recognised field. Text limits are bytes of printable ASCII.",
+  "type": "object",
+  "properties": {
+    "title":  {"$ref": "#/definitions/text63"},
+    "value":  {"$ref": "#/definitions/text127"},
+    "change": {"$ref": "#/definitions/text15"},
+    "dir":    {"$ref": "#/definitions/dir"},
+    "age_s":  {"type": "number", "minimum": 0},
+    "time":   {"$ref": "#/definitions/text15"},
+    "spark":  {"type": "array", "items": {"type": "number"}, "description": "the first 48 numbers are kept"},
+    "short":  {"anyOf": [{"type": "string", "maxLength": 7, "pattern": "^[\\x20-\\x7E]*$"}, {"type": "number"}]},
+    "alert": {
+      "type": "object",
+      "properties": {
+        "led":        {"type": "string", "pattern": "^#?[0-9A-Fa-f]{6}$"},
+        "brightness": {"type": "integer", "minimum": 0, "maximum": 255},
+        "volume":     {"type": "integer", "minimum": 0, "maximum": 255},
+        "sound":      {"type": "string", "maxLength": 1023, "description": "beep | double_beep | long_beep | none | \"\" | RTTTL; anything else is ignored with a warning"}
+      }
+    },
+    "layout": {"enum": ["single", "1x1", "1x2", "2x1", "2x2"]},
+    "tiles": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {"oneOf": [{"$ref": "#/definitions/tile"}, {"type": "null"}]}
+    },
+    "style":  {"$ref": "#/definitions/style"},
+    "status": {"type": "boolean"}
+  },
+  "anyOf": [
+    {"required": ["title"]}, {"required": ["value"]}, {"required": ["change"]}, {"required": ["dir"]},
+    {"required": ["age_s"]}, {"required": ["time"]}, {"required": ["spark"]}, {"required": ["short"]},
+    {"required": ["alert"]}, {"required": ["layout"]}, {"required": ["tiles"]}, {"required": ["style"]},
+    {"required": ["status"]}
+  ],
+  "allOf": [
+    {"if": {"properties": {"layout": {"enum": ["1x1", "1x2", "2x1", "2x2"]}}, "required": ["layout"]},
+     "then": {"required": ["tiles"]}},
+    {"if": {"properties": {"layout": {"const": "single"}}, "required": ["layout"]},
+     "then": {"not": {"required": ["tiles"]}}},
+    {"if": {"properties": {"layout": {"const": "1x1"}}, "required": ["layout"]},
+     "then": {"properties": {"tiles": {"maxItems": 1}}}},
+    {"if": {"properties": {"layout": {"enum": ["1x2", "2x1"]}}, "required": ["layout"]},
+     "then": {"properties": {"tiles": {"maxItems": 2}}}}
+  ],
+  "definitions": {
+    "text15":  {"anyOf": [{"type": "string", "maxLength": 15},  {"type": "number"}]},
+    "text23":  {"anyOf": [{"type": "string", "maxLength": 23},  {"type": "number"}]},
+    "text63":  {"anyOf": [{"type": "string", "maxLength": 63},  {"type": "number"}]},
+    "text127": {"anyOf": [{"type": "string", "maxLength": 127}, {"type": "number"}]},
+    "dir": {
+      "anyOf": [{"type": "integer"}, {"enum": ["up", "down", "flat"]}],
+      "description": "-1, 0 or 1 (another integer is read by its sign); floats are rejected"
+    },
+    "style": {
+      "type": "object",
+      "properties": {
+        "look":   {"enum": ["stack", "row", "ticker"]},
+        "size":   {"enum": ["auto", "l", "m", "s"]},
+        "invert": {"type": "boolean"}
+      }
+    },
+    "tile": {
+      "type": "object",
+      "description": "a cell; without title, value and a non-empty change it is an empty cell",
+      "properties": {
+        "title":  {"anyOf": [{"type": "string", "maxLength": 15, "pattern": "^[\\x20-\\x7E]*$"}, {"type": "number"}]},
+        "value":  {"$ref": "#/definitions/text23"},
+        "change": {"$ref": "#/definitions/text15"},
+        "dir":    {"$ref": "#/definitions/dir"},
+        "style":  {"$ref": "#/definitions/style"}
+      }
+    }
+  }
+}
+```
+
 ## Setting up the device
 
 1. Run your server where the device can reach it – the device is on your
@@ -319,7 +787,7 @@ Checking the result:
   to see a `root must be a JSON object` while you are still editing the
   server.
 * **`GET /api/screen/state`** tells you what is on the panel (`title`,
-  `value`, `layout`, `source`).
+  `value`, `layout`, `source`; for tiles also `tiles` and `symbols[]`).
 * **From your computer:** `curl -s "http://<server-host>:8000/tickr?token=<token>" | python3 -m json.tool`
   must print an object (`{ … }`), not a list (`[ … ]`).
 
@@ -341,6 +809,8 @@ Checking the result:
 | Numbers look rounded (`95240.6`) | A float sent as a JSON number is rendered with 6 significant digits | Format on the server and send a string |
 | Price shows but no triangle / LED colour | `change` missing, or the device's *LED rule* is `off` while you expected red/green by sign | Send `change` (and `dir`), or set `alert.led`; or set the LED rule to `sign` |
 | LED dark or dim although `alert.led` is set | A sticky `alert.brightness` of `0` (or a low value) from an earlier payload; `GET /api/status` → `led` shows the scaled colour | Send `"brightness": 255` (it is kept until changed and reset on boot) |
+| Tiles come out as one text / ticker frame, or the answer says `layout: 2x2 needs tiles` | `tiles` missing or not an array (`"tiles": {...}`), or only `layout` was sent | `"tiles": [ {...}, {...} ]` – an array of objects / `null`; `layout` alone selects nothing |
+| The bottom-right cell is smaller than the others / its price is cut | The status band takes its lowest 16 rows; a long `change` eats the value on a 9 pt row | Round `change` (`+15%`), put the least important item there, or `"status": false` |
 | A `POST /api/screen` works but the Pull URL does not | The URL answers something else than what you tested – a redirect to a login page, a different route, a cached old body | `curl -v` the exact URL the device uses; check `Cache-Control: no-store` |
 
 ## Prompt for an LLM
@@ -363,5 +833,36 @@ the server for you:
 > Answer HTTP/1.0 requests with a `Content-Length` header (no chunked
 > encoding), within 10 s, body under 4096 bytes, `Cache-Control:
 > no-store`; reject a wrong token with `401`. Fetch and cache the upstream
-> data in a background thread so the request is answered from memory. My
-> data source is: … The text I want on the panel is: …
+> data in a background thread so the request is answered from memory.
+> To show up to four items at once, return a **tile frame** instead:
+> `{"layout": "2x2", "tiles": [t1, t2, t3, t4], "title": "<showing line>",
+> "alert": {...}}`. `layout` is one of `"1x1"` (one cell, the whole
+> panel), `"1x2"` (two columns), `"2x1"` (two rows), `"2x2"` (four cells);
+> `tiles` is an array of **at most four** elements, at most the preset's
+> cells, in reading order (top-left, top-right, bottom-left, bottom-right).
+> Every element is a tile object `{"title": ≤ 15 printable ASCII chars,
+> "value": ≤ 23 bytes, "change": ≤ 15 bytes, "dir": 1 | 0 | -1 (optional,
+> derived from the sign of change), "style": {...} (optional)}` or `null`
+> for an empty cell – fill from the first cell, send `[null, null, null,
+> null]` when nothing qualifies, never `[]` and never an array at the root.
+> Optional `"style"` at the root (defaults for all cells) and inside a
+> tile (overrides): `"look": "stack" | "row" | "ticker"` (stack = big
+> title over a value / change row; row = one line for the wide rows of a
+> 2x1; ticker = a name badge with the price), `"size": "auto" | "l" | "m"
+> | "s"` (a cap on the title size), `"invert": true | false` (white on
+> black). Optional `"status": false` hides the Wi-Fi / power badges and
+> the age line that otherwise take the lowest 16 rows of the bottom-right
+> cell. With `tiles`, the root `value`, `change`, `dir`, `time`, `spark`
+> and `short` are ignored – do not send them; the root `title` is only a
+> label for the web UI; `age_s` and `alert` work as usual. Keep the texts
+> short: a title of 3–4 capitals, a price of ≤ 5 digits (`80000`,
+> `185.20`, `0.00237`) and a change of 4–5 characters (`+15%`, `-9.8%`)
+> stay large; the bottom-right cell of a `2x2` is the smallest, so a long
+> change there costs the price its digits – round the change, or put the
+> least important item there. The device chooses the font sizes and never
+> overflows a cell. Keep the set of cells and titles stable between
+> responses and change only the numbers – that is a quiet partial refresh;
+> a changed title, preset, `invert` or `status` is a full refresh with an
+> inversion flash. The complete JSON Schema of the payload is in the
+> section *Machine-readable contract* of this page – validate against it.
+> My data source is: … The text I want on the panel is: …
