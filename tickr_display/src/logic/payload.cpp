@@ -140,6 +140,197 @@ static bool parse_sound(JsonVariantConst v, ScreenPayload* out, char* err, size_
     return true;
 }
 
+// `dir`: -1 | 0 | 1 or "down" | "flat" | "up". `name` prefixes the error.
+static bool parse_dir(JsonVariantConst v, const char* name, TickerDir* out, char* err, size_t err_len) {
+    if (v.is<long>()) {
+        long d = v.as<long>();
+        *out = d < 0 ? -1 : (d > 0 ? 1 : 0);
+        return true;
+    }
+    if (v.is<const char*>()) {
+        const char* s = v.as<const char*>();
+        if (!s) s = "";
+        if (strcmp(s, "up") == 0)        { *out = 1;  return true; }
+        if (strcmp(s, "down") == 0)      { *out = -1; return true; }
+        if (strcmp(s, "flat") == 0)      { *out = 0;  return true; }
+    }
+    set_err2(err, err_len, name, "expected -1|0|1 or up|down|flat");
+    return false;
+}
+
+// Printable ASCII only (the fonts are Latin-1 and the fields are small).
+static bool ascii_only(const char* s) {
+    for (; *s; s++) {
+        if ((unsigned char)*s < 0x20 || (unsigned char)*s > 0x7E) return false;
+    }
+    return true;
+}
+
+// --- tile layouts (docs/API.md "Tile layouts") ---------------------------------
+
+// A `style` object (root defaults or a tile's): look / size / invert, unknown keys ignored.
+// `name` is "style" or "tiles[N].style".
+static bool parse_style(JsonVariantConst v, const char* name, TileStyleSpec* out, char* err, size_t err_len) {
+    char field[40];
+    if (!v.is<JsonObjectConst>()) {
+        set_err2(err, err_len, name, "must be an object");
+        return false;
+    }
+    JsonObjectConst o = v.as<JsonObjectConst>();
+    JsonVariantConst look = o["look"], size = o["size"], inv = o["invert"];
+    if (!look.isNull()) {
+        if (!look.is<const char*>() || !tile_look_parse(look.as<const char*>(), &out->st.look)) {
+            snprintf(field, sizeof(field), "%s.look", name);
+            set_err2(err, err_len, field, "expected stack|row|ticker");
+            return false;
+        }
+        out->has_look = true;
+    }
+    if (!size.isNull()) {
+        if (!size.is<const char*>() || !tile_size_parse(size.as<const char*>(), &out->st.size)) {
+            snprintf(field, sizeof(field), "%s.size", name);
+            set_err2(err, err_len, field, "expected auto|l|m|s");
+            return false;
+        }
+        out->has_size = true;
+    }
+    if (!inv.isNull()) {
+        if (!inv.is<bool>()) {
+            snprintf(field, sizeof(field), "%s.invert", name);
+            set_err2(err, err_len, field, "must be true or false");
+            return false;
+        }
+        out->st.invert = inv.as<bool>();
+        out->has_invert = true;
+    }
+    return true;
+}
+
+// One element of `tiles`: an object (title / value / change / dir / style, other keys
+// ignored), or null / {} for an empty cell. `idx` names the element in errors.
+static bool parse_tile(JsonVariantConst v, uint8_t idx, const TileStyleSpec* root, Tile* t,
+                       char* err, size_t err_len) {
+    char name[32];
+    TileStyleSpec own = {};
+    memset(t, 0, sizeof(*t));
+    if (v.isNull()) { tiles_style_resolve(root, nullptr, &t->style); return true; }
+    if (!v.is<JsonObjectConst>()) {
+        snprintf(name, sizeof(name), "tiles[%u]", (unsigned)idx);
+        set_err2(err, err_len, name, "must be an object or null");
+        return false;
+    }
+    JsonObjectConst o = v.as<JsonObjectConst>();
+    JsonVariantConst title = o["title"], value = o["value"], change = o["change"], dir = o["dir"], style = o["style"];
+    if (!title.isNull()) {
+        snprintf(name, sizeof(name), "tiles[%u].title", (unsigned)idx);
+        if (!copy_text_field(title, name, t->title, sizeof(t->title), err, err_len)) return false;
+        if (!ascii_only(t->title)) { set_err2(err, err_len, name, "printable ASCII only"); return false; }
+        t->has = true;
+    }
+    if (!value.isNull()) {
+        snprintf(name, sizeof(name), "tiles[%u].value", (unsigned)idx);
+        if (!copy_text_field(value, name, t->value, sizeof(t->value), err, err_len)) return false;
+        t->has = true;
+    }
+    if (!change.isNull()) {
+        snprintf(name, sizeof(name), "tiles[%u].change", (unsigned)idx);
+        if (!copy_text_field(change, name, t->change, sizeof(t->change), err, err_len)) return false;
+        if (t->change[0]) t->has = true;
+    }
+    if (!dir.isNull()) {
+        snprintf(name, sizeof(name), "tiles[%u].dir", (unsigned)idx);
+        if (!parse_dir(dir, name, &t->dir, err, err_len)) return false;
+        t->has_dir = true;
+    } else if (t->change[0]) {
+        t->dir = ticker_dir_from_change(t->change);
+        t->has_dir = true;
+    }
+    if (!style.isNull()) {
+        snprintf(name, sizeof(name), "tiles[%u].style", (unsigned)idx);
+        if (!parse_style(style, name, &own, err, err_len)) return false;
+    }
+    tiles_style_resolve(root, &own, &t->style);
+    return true;
+}
+
+// `layout`, `tiles`, `style`, `status`. Sets has_tiles / layout / tiles_n and
+// counts the recognised keys; the layout defaults by the tile count.
+static bool parse_tiles(JsonObjectConst root, ScreenPayload* out, int* recognised, char* err, size_t err_len) {
+    JsonVariantConst layout = root["layout"], tiles = root["tiles"], style = root["style"], status = root["status"];
+    bool has_layout = false;
+    if (!layout.isNull()) {
+        if (!layout.is<const char*>() || !tile_layout_parse(layout.as<const char*>(), &out->layout)) {
+            set_err(err, err_len, "layout: expected single|1x1|1x2|2x1|2x2");
+            return false;
+        }
+        has_layout = true;
+        (*recognised)++;
+    }
+    if (!style.isNull()) {
+        if (!parse_style(style, "style", &out->style, err, err_len)) return false;
+        (*recognised)++;
+    }
+    if (!status.isNull()) {
+        if (!status.is<bool>()) {
+            set_err(err, err_len, "status: must be true or false");
+            return false;
+        }
+        out->status = status.as<bool>();
+        (*recognised)++;
+    }
+    if (tiles.isNull()) {
+        if (has_layout && out->layout != TILE_LAYOUT_SINGLE) {
+            char msg[48];
+            snprintf(msg, sizeof(msg), "layout: %s needs tiles", tile_layout_str(out->layout));
+            set_err(err, err_len, msg);
+            return false;
+        }
+        return true;
+    }
+    if (!tiles.is<JsonArrayConst>()) {
+        set_err(err, err_len, "tiles: must be an array of up to 4 tiles");
+        return false;
+    }
+    if (has_layout && out->layout == TILE_LAYOUT_SINGLE) {
+        set_err(err, err_len, "layout: single cannot carry tiles");
+        return false;
+    }
+    JsonArrayConst arr = tiles.as<JsonArrayConst>();
+    size_t n = arr.size();
+    if (n > TILES_MAX) {
+        set_err(err, err_len, "tiles: more than 4");
+        return false;
+    }
+    if (!has_layout) out->layout = tiles_layout_default((uint8_t)n);
+    if (n > tiles_layout_cells(out->layout)) {
+        char msg[48];
+        snprintf(msg, sizeof(msg), "tiles: more than %u for layout %s",
+                 (unsigned)tiles_layout_cells(out->layout), tile_layout_str(out->layout));
+        set_err(err, err_len, msg);
+        return false;
+    }
+    uint8_t i = 0;
+    for (JsonVariantConst v : arr) {
+        if (!parse_tile(v, i, &out->style, &out->tiles[i], err, err_len)) return false;
+        i++;
+    }
+    // the cells the array leaves out are empty, in the root style
+    for (uint8_t k = i; k < TILES_MAX; k++) tiles_style_resolve(&out->style, nullptr, &out->tiles[k].style);
+    out->tiles_n = (uint8_t)n;
+    out->has_tiles = true;
+    (*recognised)++;
+    return true;
+}
+
+void payload_tiles_frame(const ScreenPayload& p, TilesFrame* out) {
+    memset(out, 0, sizeof(*out));
+    out->layout = p.layout;
+    out->n = tiles_layout_cells(p.layout);
+    out->status = p.status;
+    memcpy(out->t, p.tiles, sizeof(out->t));
+    out->age_s = p.has_age ? p.age_s : 0;
+}
+
 PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
                             char* err, size_t err_len) {
     if (err && err_len) err[0] = '\0';
@@ -147,6 +338,7 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
     // cppcheck-suppress memsetClassFloat ; all-zero bytes are 0.0f for spark[]
     memset(out, 0, sizeof(*out));
     out->sound = SOUND_NONE;
+    out->status = true;
 
     if (!json || len == 0) {
         set_err(err, err_len, "empty body");
@@ -175,6 +367,12 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
 
     int recognised = 0;
 
+    // Tile layouts first: with `tiles` the root value / ticker fields are
+    // ignored (a warning), the root title is the Showing line only.
+    if (!parse_tiles(root, out, &recognised, err, err_len)) return PAYLOAD_ERR_FIELD;
+    const bool tiles = out->has_tiles;
+    const char* ignored = nullptr;
+
     JsonVariantConst title = root["title"];
     JsonVariantConst value = root["value"];
     if (!title.isNull()) {
@@ -183,7 +381,12 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
         out->has_text = true;
         recognised++;
     }
-    if (!value.isNull()) {
+    if (tiles) {
+        static const char* const kIgnored[] = { "value", "change", "dir", "time", "spark", "short" };   // age_s feeds the age line
+        for (const char* k : kIgnored) {
+            if (!root[k].isNull()) { ignored = k; break; }
+        }
+    } else if (!value.isNull()) {
         if (!copy_text_field(value, "value", out->value, sizeof(out->value), err, err_len))
             return PAYLOAD_ERR_FIELD;
         out->has_text = true;
@@ -220,29 +423,17 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
     }
 
     // --- ticker fields (docs/API.md "Payload format") --------------------------
-    JsonVariantConst change = root["change"];
+    // (skipped with `tiles`, except age_s - the tiles carry their own)
+    JsonVariantConst change = tiles ? JsonVariantConst() : root["change"];
     if (!change.isNull()) {
         if (!copy_text_field(change, "change", out->change, sizeof(out->change), err, err_len))
             return PAYLOAD_ERR_FIELD;
         out->has_change = out->change[0] != '\0';   // "" = no change line, no direction
         recognised++;
     }
-    JsonVariantConst dir = root["dir"];
+    JsonVariantConst dir = tiles ? JsonVariantConst() : root["dir"];
     if (!dir.isNull()) {
-        if (dir.is<long>()) {
-            long d = dir.as<long>();
-            out->dir = d < 0 ? -1 : (d > 0 ? 1 : 0);
-        } else if (dir.is<const char*>()) {
-            const char* s = dir.as<const char*>();
-            if (!s) s = "";
-            if (strcmp(s, "up") == 0) out->dir = 1;
-            else if (strcmp(s, "down") == 0) out->dir = -1;
-            else if (strcmp(s, "flat") == 0) out->dir = 0;
-            else { set_err(err, err_len, "dir: expected -1|0|1 or up|down|flat"); return PAYLOAD_ERR_FIELD; }
-        } else {
-            set_err(err, err_len, "dir: expected -1|0|1 or up|down|flat");
-            return PAYLOAD_ERR_FIELD;
-        }
+        if (!parse_dir(dir, "dir", &out->dir, err, err_len)) return PAYLOAD_ERR_FIELD;
         out->has_dir = true;
         recognised++;
     } else if (out->has_change) {
@@ -260,13 +451,13 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
         out->age_s = a >= 4294967040.0f ? 0xFFFFFFFEu : (uint32_t)a;
         recognised++;
     }
-    JsonVariantConst time = root["time"];
+    JsonVariantConst time = tiles ? JsonVariantConst() : root["time"];
     if (!time.isNull()) {
         if (!copy_text_field(time, "time", out->time, sizeof(out->time), err, err_len))
             return PAYLOAD_ERR_FIELD;
         recognised++;
     }
-    JsonVariantConst spark = root["spark"];
+    JsonVariantConst spark = tiles ? JsonVariantConst() : root["spark"];
     if (!spark.isNull()) {
         if (!spark.is<JsonArrayConst>()) {
             set_err(err, err_len, "spark: must be an array of numbers");
@@ -279,24 +470,24 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
         }
         recognised++;
     }
-    JsonVariantConst shrt = root["short"];
+    JsonVariantConst shrt = tiles ? JsonVariantConst() : root["short"];
     if (!shrt.isNull()) {
         if (!copy_text_field(shrt, "short", out->short_label, sizeof(out->short_label), err, err_len))
             return PAYLOAD_ERR_FIELD;
         // the badge font is Latin-1 and the field is tiny: printable ASCII only
-        for (const char* c = out->short_label; *c; c++) {
-            if ((unsigned char)*c < 0x20 || (unsigned char)*c > 0x7E) {
-                set_err(err, err_len, "short: printable ASCII, up to 7 chars");
-                return PAYLOAD_ERR_FIELD;
-            }
+        if (!ascii_only(out->short_label)) {
+            set_err(err, err_len, "short: printable ASCII, up to 7 chars");
+            return PAYLOAD_ERR_FIELD;
         }
         recognised++;
     }
 
     if (recognised == 0) {
-        set_err(err, err_len, "no recognised fields (title, value, alert, change, dir, age_s, time, spark, short)");
+        set_err(err, err_len, "no recognised fields (title, value, alert, change, dir, age_s, time, spark, short, layout, tiles, style, status)");
         return PAYLOAD_ERR_NOTHING_TO_DO;
     }
+    // Not an error (like an unknown alert.sound): the root field is ignored, the tiles are drawn.
+    if (ignored && err && err_len && !err[0]) snprintf(err, err_len, "%s ignored: tiles present", ignored);
     return PAYLOAD_OK;
 }
 

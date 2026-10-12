@@ -1505,7 +1505,7 @@ bool ConnectivityManager::fetch_ticker() {
         return false;
     }
     SourceResult* res = (SourceResult*)malloc(sizeof(SourceResult));
-    ScreenPayload* p = (ScreenPayload*)malloc(sizeof(ScreenPayload));   // ~1.3 KB: off the loop task's stack
+    ScreenPayload* p = (ScreenPayload*)malloc(sizeof(ScreenPayload));   // ~1.7 KB: off the loop task's stack
     if (!res || !p) {
         free(res);
         free(p);
@@ -1689,10 +1689,27 @@ void ConnectivityManager::run_pull_test() {
                 PayloadResult r = payload_parse(buf, got, p, err, sizeof(err));
                 ok = r == PAYLOAD_OK;
                 if (ok) {
-                    body = "{\"ok\":true,\"title\":\"" + json_escape(p->title) +
+                    // A tile payload (docs/API.md "Tile layouts"): layout = the preset
+                    // name, tiles = the filled cells, title = the Showing line.
+                    char title[PAYLOAD_TITLE_MAX];
+                    strlcpy(title, p->title, sizeof(title));
+                    const char* layout = payload_is_tiles(*p) ? tile_layout_str(p->layout)
+                                       : payload_is_ticker(*p) ? "ticker" : "text";
+                    unsigned filled = 0;
+                    if (payload_is_tiles(*p)) {
+                        TilesFrame* f = (TilesFrame*)malloc(sizeof(TilesFrame));
+                        if (f) {
+                            payload_tiles_frame(*p, f);
+                            for (uint8_t i = 0; i < f->n; i++) filled += f->t[i].has ? 1 : 0;
+                            if (!title[0]) tiles_join_titles(f, title, sizeof(title));
+                            free(f);
+                        }
+                    }
+                    body = "{\"ok\":true,\"title\":\"" + json_escape(title) +
                            "\",\"value\":\"" + json_escape(p->value) +
-                           "\",\"layout\":\"" + (p->has_change || p->spark_n > 0 ? "ticker" : "text") +
+                           "\",\"layout\":\"" + layout +
                            "\",\"bytes\":" + String((unsigned)got);
+                    if (payload_is_tiles(*p)) body += ",\"tiles\":" + String(filled);
                     if (err[0]) body += ",\"warning\":\"" + json_escape(err) + "\"";
                 }
             } else {

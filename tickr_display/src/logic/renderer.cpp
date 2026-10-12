@@ -51,11 +51,24 @@ void renderer_apply(const ScreenPayload& p) {
         indication_set_brightness(p.brightness);
     }
     uint8_t r, g, b;
-    if (ticker_led_decide(s_led_rule, p.has_led, p.r, p.g, p.b, p.has_dir, p.dir, &r, &g, &b)) {
+    // The LED rule follows the first tile of a tile frame (docs/API.md "Tile layouts").
+    const bool tiles = payload_is_tiles(p);
+    const bool has_dir = tiles ? (p.tiles[0].has && p.tiles[0].has_dir) : p.has_dir;
+    const TickerDir dir = tiles ? p.tiles[0].dir : p.dir;
+    if (ticker_led_decide(s_led_rule, p.has_led, p.r, p.g, p.b, has_dir, dir, &r, &g, &b)) {
         indication_led_rgb(r, g, b);
     }
     renderer_play_sound(p.sound, p.rtttl);
 
+    if (tiles) {
+        // Tiles win over the ticker and text looks. The frame (~270 B) is
+        // static: the loop task's stack is tight (main.cpp) and this runs there.
+        static TilesFrame s_frame;
+        payload_tiles_frame(p, &s_frame);
+        Serial.printf("Rendering tiles: %s, %u cells\n", tile_layout_str(s_frame.layout), (unsigned)s_frame.n);
+        display_show_tiles(&s_frame, p.has_text ? p.title : nullptr);
+        return;
+    }
     bool ticker = payload_is_ticker(p);
     if (p.has_text || ticker) {
         Serial.printf("Rendering%s: %s - %s %s\n", ticker ? " ticker" : "", p.title, p.value, p.change);
@@ -75,7 +88,7 @@ void renderer_apply(const ScreenPayload& p) {
 }
 
 bool renderer_process_payload(const char* json, size_t len) {
-    // ScreenPayload is ~1.3 KB; keep it off the (8 KB) loop task stack.
+    // ScreenPayload is ~1.7 KB; keep it off the (8 KB) loop task stack.
     ScreenPayload* p = (ScreenPayload*)malloc(sizeof(ScreenPayload));
     if (!p) {
         Serial.println("Renderer: out of memory");

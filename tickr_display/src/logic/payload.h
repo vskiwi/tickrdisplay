@@ -23,10 +23,27 @@
 // Every field is optional, but the document must be a JSON object and must
 // contain at least one recognised field. `change` or `spark` selects the
 // ticker layout; a plain title/value payload keeps the Text look.
+//
+// Tile layouts (docs/API.md "Tile layouts") - a frame of up to four cells:
+// {
+//   "layout": "2x2",               // single (default, no tiles) | 1x1 | 1x2 | 2x1 | 2x2; absent with tiles = by their count
+//   "tiles": [                     // up to the preset's cells: object | null | {} (empty cell); fewer = the rest empty
+//     {"title":"BTC","value":"80000","change":"+15%","dir":1,
+//      "style":{"look":"stack","size":"l","invert":true}},   // per-tile style, optional
+//     null
+//   ],
+//   "style": {"look":"stack","size":"auto","invert":false},  // defaults for every tile, optional
+//   "status": true,                // the badges + age line in the bottom-right cell (default true)
+//   "age_s": 20, "title": "...", "alert": {...}               // as above; title = the Showing line only
+// }
+// With `tiles` the root `value`, `change`, `dir`, `time`, `spark` and `short`
+// are ignored (a warning in err). The sender picks the tiles, the device
+// draws them (logic/tiles.h).
 
 #include <stdint.h>
 #include <stddef.h>
 #include "ticker.h"
+#include "tiles.h"
 
 #define PAYLOAD_MAX_LEN     4096   // maximum accepted raw JSON size (bytes)
 #define PAYLOAD_JSON_DOC    4096   // ArduinoJson document capacity used for parsing
@@ -71,9 +88,22 @@ struct ScreenPayload {
     uint8_t  spark_n;                    // numeric points kept (<= TICKER_SPARK_MAX)
     float    spark[TICKER_SPARK_MAX];
     char     short_label[TICKER_SHORT_MAX]; // "" = absent
+
+    // --- tile layouts (docs/API.md "Tile layouts") ---------------------------
+    bool     has_tiles;                  // `tiles` present (also an empty array): a tile frame
+    uint8_t  layout;                     // TileLayout: the named preset, or the default by the tile count; SINGLE without tiles
+    uint8_t  tiles_n;                    // elements of `tiles` (<= TILES_MAX; the rest of the preset is empty)
+    bool     status;                     // the status band (default true)
+    TileStyleSpec style;                 // root defaults as written
+    Tile     tiles[TILES_MAX];           // the cells, styles resolved
 };
 // The ticker layout is selected by `change` or `spark` (docs/API.md "Payload format").
 static inline bool payload_is_ticker(const ScreenPayload& p) { return p.has_change || p.spark_n > 0; }
+// A tile frame is selected by `tiles` (wins over the ticker and text looks).
+static inline bool payload_is_tiles(const ScreenPayload& p) { return p.has_tiles; }
+// The frame hal_display draws for a tile payload: layout, cells, status,
+// age (payload age_s, else 0 = as old as the frame, like a ticker).
+void payload_tiles_frame(const ScreenPayload& p, TilesFrame* out);
 
 enum PayloadResult : uint8_t {
     PAYLOAD_OK = 0,

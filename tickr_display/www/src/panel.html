@@ -289,7 +289,7 @@ req(base(d),'/api/source/test','POST',tkf(1,ri)).then(function(j){r.className='h
 function urlTest(){var d=C.d,r=$('ur'),b=$('ut'),u=$('cu').value.trim();if(!d||!r)return;if(!u){r.className='hint err';r.textContent='URL required';return}
 if(b)b.disabled=true;r.className='hint';r.textContent='\u2026 fetching on '+d.name;
 req(base(d),'/api/pull/test','POST',{pull_url:u}).then(function(j){r.className='hint '+(j.ok?'ok':'err');
-r.textContent=j.ok?'OK ('+j.layout+', '+j.bytes+' B): '+(j.title||'')+(j.title&&j.value?' / ':'')+(j.value||'')+(j.warning?'  - '+j.warning:'')+'  ('+j.ms+' ms)':'Error: '+(j.error||j._s)+(j.ms?' ('+j.ms+' ms)':'')}).catch(function(e){r.className='hint err';r.textContent='Error: '+e.message}).then(function(){if(b)b.disabled=false})}
+r.textContent=j.ok?'OK ('+j.layout+(j.tiles!=null?', '+j.tiles+' tiles':'')+', '+j.bytes+' B): '+(j.title||'')+(j.title&&j.value?' / ':'')+(j.value||'')+(j.warning?'  - '+j.warning:'')+'  ('+j.ms+' ms)':'Error: '+(j.error||j._s)+(j.ms?' ('+j.ms+' ms)':'')}).catch(function(e){r.className='hint err';r.textContent='Error: '+e.message}).then(function(){if(b)b.disabled=false})}
 // "For all" (docs/WEB_UI.md "Content for all devices"): the same sheet with a device list (all members ticked, or a saved
 // group from layout.groups); Text goes to the online devices at once and is parked on the relay for the sleeping
 // ones (PUT /api/relay/<id>), a URL is written to the online devices only; one result line per device.

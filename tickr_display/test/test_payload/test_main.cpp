@@ -280,8 +280,216 @@ void test_short_field(void) {
     TEST_ASSERT_FALSE(payload_is_ticker(P));
 }
 
+// --- tile layouts (docs/API.md "Tile layouts") ---------------------------------
+
+void test_tiles_three_of_four_with_null(void) {
+    // the pump-tiles case: three coins, the fourth cell empty, a style on one tile
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse(
+        "{\"layout\":\"2x2\",\"tiles\":["
+        "{\"title\":\"BTC\",\"value\":\"80000\",\"change\":\"+15%\",\"style\":{\"invert\":true,\"size\":\"l\"}},"
+        "{\"title\":\"ETH\",\"value\":\"4100\",\"change\":\"+12.3%\",\"dir\":1},"
+        "{\"title\":\"SOL\",\"value\":\"185.20\",\"change\":\"+10%\",\"style\":{\"look\":\"row\"}},"
+        "null],\"age_s\":20,\"alert\":{\"led\":\"00FF00\"}}"));
+    TEST_ASSERT_TRUE(payload_is_tiles(P));
+    TEST_ASSERT_FALSE(payload_is_ticker(P));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_2X2, P.layout);
+    TEST_ASSERT_EQUAL_UINT8(4, P.tiles_n);
+    TEST_ASSERT_TRUE(P.status);
+    TEST_ASSERT_TRUE(P.tiles[0].has);
+    TEST_ASSERT_EQUAL_STRING("BTC", P.tiles[0].title);
+    TEST_ASSERT_EQUAL_STRING("80000", P.tiles[0].value);
+    TEST_ASSERT_EQUAL_STRING("+15%", P.tiles[0].change);
+    TEST_ASSERT_TRUE(P.tiles[0].has_dir);                   // derived from the sign
+    TEST_ASSERT_EQUAL_INT(1, P.tiles[0].dir);
+    TEST_ASSERT_TRUE(P.tiles[0].style.invert);
+    TEST_ASSERT_EQUAL_UINT8(TILE_SIZE_L, P.tiles[0].style.size);
+    TEST_ASSERT_EQUAL_UINT8(TILE_LOOK_STACK, P.tiles[0].style.look);
+    TEST_ASSERT_FALSE(P.tiles[1].style.invert);
+    TEST_ASSERT_EQUAL_UINT8(TILE_LOOK_ROW, P.tiles[2].style.look);
+    TEST_ASSERT_FALSE(P.tiles[3].has);
+    TEST_ASSERT_TRUE(P.has_age);
+    TEST_ASSERT_EQUAL_UINT32(20, P.age_s);
+    TEST_ASSERT_TRUE(P.has_led);
+    TEST_ASSERT_EQUAL_STRING("", ERR);
+    // the frame hal_display draws
+    TilesFrame f;
+    payload_tiles_frame(P, &f);
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_2X2, f.layout);
+    TEST_ASSERT_EQUAL_UINT8(4, f.n);
+    TEST_ASSERT_TRUE(f.status);
+    TEST_ASSERT_EQUAL_UINT32(20, f.age_s);
+    TEST_ASSERT_EQUAL_STRING("SOL", f.t[2].title);
+    TEST_ASSERT_FALSE(f.t[3].has);
+}
+
+void test_tiles_empty_forms_and_defaults(void) {
+    // {} and a short array are empty cells; the layout defaults by the count
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[{\"title\":\"BTC\",\"value\":\"1\"},{}]}"));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_1X2, P.layout);
+    TEST_ASSERT_EQUAL_UINT8(2, P.tiles_n);
+    TEST_ASSERT_TRUE(P.tiles[0].has);
+    TEST_ASSERT_FALSE(P.tiles[1].has);
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[{\"value\":\"42\"}]}"));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_1X1, P.layout);
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[{\"title\":\"A\"},{\"title\":\"B\"},{\"title\":\"C\"}]}"));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_2X2, P.layout);
+    TEST_ASSERT_EQUAL_UINT8(3, P.tiles_n);
+    TEST_ASSERT_FALSE(P.tiles[3].has);
+    // all empty: accepted, a blank grid
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[null,null,null,null]}"));
+    TEST_ASSERT_TRUE(payload_is_tiles(P));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_2X2, P.layout);
+    for (int i = 0; i < 4; i++) TEST_ASSERT_FALSE(P.tiles[i].has);
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[]}"));
+    TEST_ASSERT_TRUE(payload_is_tiles(P));
+    TEST_ASSERT_EQUAL_UINT8(0, P.tiles_n);
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_2X2, P.layout);
+    // a tile with unknown keys only is empty too; a change alone fills a tile
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[{\"text\":\"x\"},{\"change\":\"-2%\"}]}"));
+    TEST_ASSERT_FALSE(P.tiles[0].has);
+    TEST_ASSERT_TRUE(P.tiles[1].has);
+    TEST_ASSERT_EQUAL_INT(-1, P.tiles[1].dir);
+    // a status flag and a smaller preset
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"layout\":\"2x1\",\"status\":false,\"tiles\":[{\"title\":\"A\",\"value\":\"1\"}]}"));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_2X1, P.layout);
+    TEST_ASSERT_FALSE(P.status);
+    TEST_ASSERT_EQUAL_UINT8(1, P.tiles_n);
+}
+
+void test_tiles_root_style_and_overrides(void) {
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse(
+        "{\"style\":{\"look\":\"ticker\",\"invert\":true,\"size\":\"m\",\"colour\":\"red\"},"
+        "\"tiles\":[{\"title\":\"A\",\"value\":\"1\"},{\"title\":\"B\",\"value\":\"2\",\"style\":{\"invert\":false}},null]}"));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LOOK_TICKER, P.tiles[0].style.look);
+    TEST_ASSERT_TRUE(P.tiles[0].style.invert);
+    TEST_ASSERT_EQUAL_UINT8(TILE_SIZE_M, P.tiles[0].style.size);
+    TEST_ASSERT_EQUAL_UINT8(TILE_LOOK_TICKER, P.tiles[1].style.look);
+    TEST_ASSERT_FALSE(P.tiles[1].style.invert);                       // the tile's key wins
+    TEST_ASSERT_EQUAL_UINT8(TILE_SIZE_M, P.tiles[1].style.size);
+    TEST_ASSERT_TRUE(P.tiles[2].style.invert);                        // the empty cell carries the root style (unused)
+    TEST_ASSERT_TRUE(P.tiles[3].style.invert);                        // the omitted cell too
+    TEST_ASSERT_EQUAL_STRING("", ERR);
+    // a root style alone is a recognised field (no tiles: nothing drawn, no error)
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"style\":{\"invert\":true}}"));
+    TEST_ASSERT_FALSE(payload_is_tiles(P));
+}
+
+void test_tiles_rejections(void) {
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":{\"title\":\"BTC\"}}"));
+    TEST_ASSERT_EQUAL_STRING("tiles: must be an array of up to 4 tiles", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{},{},{},{},{}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles: more than 4", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"layout\":\"1x2\",\"tiles\":[{},{},{}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles: more than 2 for layout 1x2", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"title\":\"A\"},{\"title\":\"B\"},\"C\"]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[2]: must be an object or null", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{},{},{\"title\":\"ABCDEFGHIJKLMNOP\"}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[2].title: too long", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[{\"title\":\"ABCDEFGHIJKLMNO\"}]}"));   // 15 chars fit
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"title\":\"\\u20ac\"}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[0].title: printable ASCII only", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"value\":\"123456789012345678901234\"}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[0].value: too long", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"change\":\"+12345678901.23%\"}]}"));   // 16 chars
+    TEST_ASSERT_EQUAL_STRING("tiles[0].change: too long", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"title\":true}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[0].title: must be a string", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{},{\"title\":\"A\",\"dir\":\"rising\"}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[1].dir: expected -1|0|1 or up|down|flat", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"title\":\"A\",\"dir\":1.5}]}"));
+    // layout
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"layout\":\"grid\",\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("layout: expected single|1x1|1x2|2x1|2x2", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"layout\":2,\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("layout: expected single|1x1|1x2|2x1|2x2", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"layout\":\"2x2\",\"title\":\"x\"}"));
+    TEST_ASSERT_EQUAL_STRING("layout: 2x2 needs tiles", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"layout\":\"single\",\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("layout: single cannot carry tiles", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"layout\":\"single\",\"title\":\"plain\"}"));   // declarative, harmless
+    TEST_ASSERT_FALSE(payload_is_tiles(P));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_SINGLE, P.layout);
+    // style
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"style\":\"bold\",\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("style: must be an object", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"style\":{\"look\":\"big\"},\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("style.look: expected stack|row|ticker", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"style\":{\"size\":\"xl\"},\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("style.size: expected auto|l|m|s", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"style\":{\"invert\":\"yes\"},\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("style.invert: must be true or false", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"title\":\"A\",\"style\":{\"look\":1}}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[0].style.look: expected stack|row|ticker", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"tiles\":[{\"title\":\"A\",\"style\":[]}]}"));
+    TEST_ASSERT_EQUAL_STRING("tiles[0].style: must be an object", ERR);
+    // status
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"status\":\"off\",\"tiles\":[{}]}"));
+    TEST_ASSERT_EQUAL_STRING("status: must be true or false", ERR);
+    // the recognised list names the new keys
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_NOTHING_TO_DO, parse("{\"cells\":[]}"));
+    TEST_ASSERT_NOT_NULL(strstr(ERR, "tiles"));
+}
+
+void test_tiles_ignore_root_fields_with_warning(void) {
+    // the root value / ticker fields are ignored (a warning), the title is kept, age_s counts
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse(
+        "{\"title\":\"Movers\",\"value\":\"BTC +15% | ETH +12%\",\"change\":\"+15%\",\"dir\":1,\"short\":\"BTC\","
+        "\"spark\":[1,2,3],\"time\":\"19:00\",\"age_s\":5,\"tiles\":[{\"title\":\"BTC\",\"value\":\"80000\"}]}"));
+    TEST_ASSERT_TRUE(payload_is_tiles(P));
+    TEST_ASSERT_EQUAL_STRING("value ignored: tiles present", ERR);
+    TEST_ASSERT_TRUE(P.has_text);
+    TEST_ASSERT_EQUAL_STRING("Movers", P.title);
+    TEST_ASSERT_EQUAL_STRING("", P.value);
+    TEST_ASSERT_FALSE(P.has_change);
+    TEST_ASSERT_FALSE(P.has_dir);
+    TEST_ASSERT_EQUAL_UINT8(0, P.spark_n);
+    TEST_ASSERT_EQUAL_STRING("", P.short_label);
+    TEST_ASSERT_EQUAL_STRING("", P.time);
+    TEST_ASSERT_TRUE(P.has_age);
+    TEST_ASSERT_EQUAL_UINT32(5, P.age_s);
+    // the warning names the first ignored key; an invalid ignored field is not even looked at
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[{\"title\":\"A\"}],\"dir\":\"sideways\"}"));
+    TEST_ASSERT_EQUAL_STRING("dir ignored: tiles present", ERR);
+    // an alert.sound warning is not displaced
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"tiles\":[{\"title\":\"A\"}],\"value\":\"x\",\"alert\":{\"sound\":\"ding\"}}"));
+    TEST_ASSERT_EQUAL_STRING("alert.sound ignored: unknown preset or invalid RTTTL", ERR);
+    TEST_ASSERT_EQUAL(SOUND_UNKNOWN, P.sound);
+}
+
+void test_tiles_absent_keeps_single_payload_identical(void) {
+    // a payload without tiles parses to the same struct as before the tiles existed:
+    // every tile field is zero / default, nothing else changes
+    ScreenPayload ref;
+    memset(&ref, 0, sizeof(ref));
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"title\":\"Bitcoin\",\"value\":\"$95,240\",\"change\":\"+0.07%\",\"dir\":1,\"age_s\":120,"
+                                        "\"spark\":[83950,83990,84001],\"short\":\"BTC\",\"time\":\"19:00\","
+                                        "\"alert\":{\"led\":\"00FF00\",\"brightness\":128,\"sound\":\"double_beep\",\"volume\":128}}"));
+    TEST_ASSERT_FALSE(payload_is_tiles(P));
+    TEST_ASSERT_TRUE(payload_is_ticker(P));
+    TEST_ASSERT_EQUAL_UINT8(TILE_LAYOUT_SINGLE, P.layout);
+    TEST_ASSERT_EQUAL_UINT8(0, P.tiles_n);
+    TEST_ASSERT_TRUE(P.status);                                        // the default, unused without tiles
+    TEST_ASSERT_FALSE(P.style.has_look || P.style.has_size || P.style.has_invert);
+    for (int i = 0; i < TILES_MAX; i++) {
+        TEST_ASSERT_EQUAL_MEMORY(&ref.tiles[i], &P.tiles[i], sizeof(Tile));
+    }
+    TEST_ASSERT_EQUAL_STRING("Bitcoin", P.title);
+    TEST_ASSERT_EQUAL_STRING("$95,240", P.value);
+    TEST_ASSERT_EQUAL_STRING("+0.07%", P.change);
+    TEST_ASSERT_EQUAL_STRING("BTC", P.short_label);
+    TEST_ASSERT_EQUAL_STRING("19:00", P.time);
+    TEST_ASSERT_EQUAL_UINT8(3, P.spark_n);
+    TEST_ASSERT_EQUAL_STRING("", ERR);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_tiles_three_of_four_with_null);
+    RUN_TEST(test_tiles_empty_forms_and_defaults);
+    RUN_TEST(test_tiles_root_style_and_overrides);
+    RUN_TEST(test_tiles_rejections);
+    RUN_TEST(test_tiles_ignore_root_fields_with_warning);
+    RUN_TEST(test_tiles_absent_keeps_single_payload_identical);
     RUN_TEST(test_short_field);
     RUN_TEST(test_ticker_fields_full);
     RUN_TEST(test_plain_payload_is_not_a_ticker);

@@ -113,6 +113,8 @@ static char _last_message[128] = "";
 static TickerFields _tk = {};                // ticker fields of the content; _tk.ticker selects the layout
 static GridFrame _grid = {};                 // the cells of a grid frame (docs/TICKERS.md "Several tickers on one panel: the 2x2 grid")
 static bool      _grid_on = false;           // the content is the grid (_tk.ticker is set too: age line, stale)
+static TilesFrame _tiles = {};               // the cells of a payload's tile frame (docs/API.md "Tile layouts")
+static bool      _tiles_on = false;          // the content is a tile frame (_tk.ticker set as for the grid)
 static uint32_t _stale_ms = DS_T_STALE_MIN_MS; // T_stale for the age line (display_set_stale_ms)
 static uint32_t _content_at_ms = 0;          // when the content was last shown (stale_s)
 static bool     _stale_fired = false;        // the stale crossing of this content already asked for its refresh (display_stale_crossed)
@@ -145,9 +147,9 @@ static uint32_t _refreshes_skipped = 0;      // badge changes folded into a late
 // the copy also survives ESP.restart(). CRC-32 over everything before
 // `crc`; a torn copy (crash mid-write) or random memory (power-on) fails it.
 // Layout kind of the last BASE content frame: text / ticker / WAITING / the
-// 2x2 grid - the policy's layout_changed (cards and service frames leave it
-// alone, so the content back after one compares against its own kind).
-enum ShownKind : uint8_t { SHOWN_NONE = 0, SHOWN_TEXT, SHOWN_TICKER, SHOWN_WAITING, SHOWN_GRID };
+// 2x2 grid / a tile frame - the policy's layout_changed (cards and service
+// frames leave it alone, so the content back after one compares against its own kind).
+enum ShownKind : uint8_t { SHOWN_NONE = 0, SHOWN_TEXT, SHOWN_TICKER, SHOWN_WAITING, SHOWN_GRID, SHOWN_TILES };
 struct RtcFrame {
     uint8_t  px[SCREEN_FRAME_LEN];
     uint8_t  partials_since_full;
@@ -392,11 +394,11 @@ static int16_t draw_badges() {
 // Change triangle in an 11x6 box with its top-left at (x, y): up / down as
 // rows of growing width, flat as a 2 px dash (the fonts have
 // no arrow glyphs and fillTriangle is not linked).
-static void draw_dir(int16_t x, int16_t y, int8_t dir) {
-    if (dir == 0) { canvas.fillRect(x, y + 2, 11, 2, CV_BLACK); return; }
+static void draw_dir(int16_t x, int16_t y, int8_t dir, uint16_t colour = CV_BLACK) {
+    if (dir == 0) { canvas.fillRect(x, y + 2, 11, 2, colour); return; }
     for (int16_t i = 0; i < 6; i++) {
         int16_t row = dir > 0 ? i : 5 - i;
-        canvas.drawFastHLine(x + 5 - i, y + row, 2 * i + 1, CV_BLACK);
+        canvas.drawFastHLine(x + 5 - i, y + row, 2 * i + 1, colour);
     }
 }
 
@@ -569,19 +571,25 @@ static int16_t grid_measure(const char* text, uint8_t font_step, void*) {
     return (int16_t)bw;
 }
 
-static void draw_grid_cell(int16_t x, int16_t y, const GridCell& c) {
+// `inv`: the cell is drawn white on black (a tile's `invert`, docs/API.md "Tile
+// layouts") - the badge field becomes white with black text. The caller has
+// filled the cell and set the text colour; this leaves the colour as found.
+static void draw_grid_cell(int16_t x, int16_t y, const GridCell& c, bool inv = false, int16_t w = GRID_CELL_W) {
     static const GFXfont* const kBadge[] = { &FreeSansBold12pt7b, &FreeSansBold9pt7b };
+    const uint16_t fg = inv ? CV_WHITE : CV_BLACK, bg = inv ? CV_BLACK : CV_WHITE;
     int16_t bx, by; uint16_t bw, bh;
-    const int16_t right = x + GRID_CELL_W - 1 - GRID_CELL_PAD;
-    // row A: the badge ...
-    char buf[TICKER_SHORT_MAX + 4];
-    const char* s = fit_text(c.short_label, kBadge, 2, GRID_BADGE_MAX_W - 2 * GRID_BADGE_PAD, 0, 0, buf, sizeof(buf));
-    canvas.getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
-    canvas.fillRect(x, y, (int16_t)bw + 2 * GRID_BADGE_PAD, GRID_BADGE_H, CV_BLACK);
-    canvas.setTextColor(CV_WHITE);
-    canvas.setCursor(x + GRID_BADGE_PAD - bx, y + (GRID_BADGE_H - (int16_t)bh) / 2 - by);
-    canvas.print(s);
-    canvas.setTextColor(CV_BLACK);
+    const int16_t right = x + w - 1 - GRID_CELL_PAD;
+    // row A: the badge (a tile without a title has none) ...
+    if (c.short_label[0]) {
+        char buf[TICKER_SHORT_MAX + 4];
+        const char* s = fit_text(c.short_label, kBadge, 2, GRID_BADGE_MAX_W - 2 * GRID_BADGE_PAD, 0, 0, buf, sizeof(buf));
+        canvas.getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
+        canvas.fillRect(x, y, (int16_t)bw + 2 * GRID_BADGE_PAD, GRID_BADGE_H, fg);
+        canvas.setTextColor(bg);
+        canvas.setCursor(x + GRID_BADGE_PAD - bx, y + (GRID_BADGE_H - (int16_t)bh) / 2 - by);
+        canvas.print(s);
+        canvas.setTextColor(fg);
+    }
     // ... and the change, or "?" when this cycle missed the source
     if (!c.ok) {
         canvas.setFont(&FreeSansBold12pt7b);
@@ -594,13 +602,13 @@ static void draw_grid_cell(int16_t x, int16_t y, const GridCell& c) {
         int16_t cx = right - (int16_t)bw;
         canvas.setCursor(cx - bx, y + (GRID_BADGE_H - (int16_t)bh) / 2 - by);
         canvas.print(c.change);
-        draw_dir(cx - 15, y + (GRID_BADGE_H - 6) / 2, c.dir);
+        draw_dir(cx - 15, y + (GRID_BADGE_H - 6) / 2, c.dir, fg);
     }
     // row B: the price, centred in the price band
     if (c.price[0]) {
         char trimmed[GRID_PRICE_MAX];
         const char* p;
-        uint8_t step = grid_fit_price(c.price, GRID_CELL_W - 2 * GRID_CELL_PAD, grid_measure, nullptr, trimmed, sizeof(trimmed), &p);
+        uint8_t step = grid_fit_price(c.price, w - 2 * GRID_CELL_PAD, grid_measure, nullptr, trimmed, sizeof(trimmed), &p);
         grid_measure(p, step <= 1 ? 0 : step - 1, nullptr);   // selects the step's font
         canvas.getTextBounds(p, 0, 0, &bx, &by, &bw, &bh);
         canvas.setCursor(right - (int16_t)bw - bx, y + GRID_PRICE_TOP + (GRID_PRICE_H - (int16_t)bh) / 2 - by);
@@ -624,6 +632,140 @@ static void draw_grid(int16_t badges_x) {
     ticker_age_line(a, a >= _stale_ms / 1000, age, sizeof(age));
     if (age[0]) {
         const int16_t x = GRID_CELL_W + 1 + GRID_CELL_PAD;
+        print_fitted(age, x, SCREEN_H - 3, kSmall, 1, badges_x - 6 - x);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tile frames (docs/API.md "Tile layouts"): a payload's `tiles` in the cells of a
+// preset (logic/tiles.h decides the rectangles, the bands and the font
+// ladders; this draws). A cell is white, or black with white text when the
+// tile inverts; an empty cell stays white. Looks: `stack` - the title in
+// the upper band, the value bottom-left and the change (with its triangle)
+// bottom-right, three bands in a tall cell; `row` - one line, title left,
+// value and change right; `ticker` - the grid cell above. The status band
+// (badges, age line) is the bottom-right cell's lowest 16 rows when
+// f->status is set; the frame's separators are the grid's.
+// ---------------------------------------------------------------------------
+static const GFXfont* const kStepFont[TILE_F_COUNT] = {
+    &FreeSansBold18pt7b, &FreeSansBold12pt7b, &FreeSansBold18pt7b, &FreeSansBold12pt7b, &FreeSansBold9pt7b };
+static const uint8_t kStepX2[TILE_F_COUNT] = { 1, 1, 0, 0, 0 };
+
+// tiles_fit_row's measure: the bbox width of `text` at `step` (leaves the step selected).
+static int16_t tiles_measure(const char* text, uint8_t step, void*) {
+    if (step >= TILE_F_COUNT) step = TILE_F9;
+    canvas.setFont(kStepFont[step]);
+    canvas.setTextSize(kStepX2[step] ? 2 : 1);
+    int16_t bx, by; uint16_t bw, bh;
+    canvas.getTextBounds(text, 0, 0, &bx, &by, &bw, &bh);
+    canvas.setTextSize(1);
+    return (int16_t)bw;
+}
+
+// Draws `text` in the band [top, top + h) with steps[from .. n): the largest
+// that fits max_w and the band, cut with "..." at the smallest (fit_text);
+// left-aligned at `x`, or ending at `right`. Returns the drawn width.
+static int16_t draw_band_text(const char* text, const uint8_t* steps, uint8_t from, uint8_t n,
+                              int16_t x, int16_t right, bool right_align, int16_t top, int16_t h, int16_t max_w) {
+    const GFXfont* fonts[TILE_F_COUNT];
+    uint8_t mask = 0, k = 0;
+    for (uint8_t i = from; i < n && k < TILE_F_COUNT; i++, k++) {
+        fonts[k] = kStepFont[steps[i]];
+        if (kStepX2[steps[i]]) mask |= (uint8_t)(1u << k);
+    }
+    if (!k) { fonts[0] = &FreeSansBold9pt7b; k = 1; }
+    char buf[TILE_VALUE_MAX + 4];
+    const char* s = fit_text(text, fonts, k, max_w, h, mask, buf, sizeof(buf));
+    int16_t bx, by; uint16_t bw, bh;
+    canvas.getTextBounds(s, 0, 0, &bx, &by, &bw, &bh);
+    const int16_t cx = right_align ? right - (int16_t)bw : x;
+    canvas.setCursor(cx - bx, top + (h - (int16_t)bh) / 2 - by);
+    canvas.print(s);
+    canvas.setTextSize(1);
+    return (int16_t)bw;
+}
+
+// The change right-aligned in its band with the triangle left of it; returns the width taken (text + arrow).
+static int16_t draw_tile_change(const Tile& t, const TileSteps& st, uint8_t from, int16_t right,
+                                int16_t top, int16_t h, int16_t max_w, uint16_t fg) {
+    int16_t w = draw_band_text(t.change, st.change, from, st.change_n, 0, right, true, top, h, max_w - TILES_ARROW_W);
+    draw_dir(right - w - TILES_ARROW_W, top + (h - 6) / 2, t.has_dir ? t.dir : 0, fg);
+    return w + TILES_ARROW_W;
+}
+
+static void draw_tile_cell(uint8_t idx, const Tile& t) {
+    if (!t.has) return;
+    TileRect u;
+    tiles_usable(_tiles.layout, idx, _tiles.status, &u);
+    const bool inv = t.style.invert;
+    const uint16_t fg = inv ? CV_WHITE : CV_BLACK;
+    if (inv) canvas.fillRect(u.x, u.y, u.w, u.h, CV_BLACK);     // the status band stays white
+    canvas.setTextColor(fg);
+    if (t.style.look == TILE_LOOK_TICKER) {
+        GridCell c;
+        memset(&c, 0, sizeof(c));
+        strlcpy(c.short_label, t.title, sizeof(c.short_label));
+        strlcpy(c.price, t.value, sizeof(c.price));
+        strlcpy(c.change, t.change, sizeof(c.change));
+        c.dir = t.has_dir ? t.dir : 0;
+        c.ok = c.has = true;
+        draw_grid_cell(u.x, u.y, c, inv, u.w);
+        canvas.setTextColor(CV_BLACK);
+        return;
+    }
+    TileGeom g;
+    TileSteps st;
+    tiles_geometry(t.style.look, &u, tiles_frame_min_h(_tiles.layout, _tiles.status), _tiles.status, &g);
+    tiles_steps(t.style.look, t.style.size, &g, &st);
+    const int16_t left = u.x + TILES_PAD, right = u.x + u.w - 1 - TILES_PAD, max_w = u.w - 2 * TILES_PAD;
+    const int16_t extra = t.change[0] ? TILES_ARROW_W : 0;
+    uint8_t ti, vi, ci;
+    if (g.rows == 1) {
+        // one line: the three share the width, the change shrinks first (tiles_fit_row);
+        // when even the smallest steps do not fit, the title keeps up to 3/5 of
+        // the room left of the change and the value is the one cut with "..."
+        const bool fits = tiles_fit_row(tiles_measure, nullptr, t.title, t.value, t.change, &st, max_w, TILES_GAP, extra, &ti, &vi, &ci);
+        int16_t r = right;
+        if (t.change[0]) r -= draw_tile_change(t, st, ci, r, u.y + g.change_top, g.change_h, max_w, fg) + TILES_GAP;
+        int16_t tw = 0;
+        if (t.title[0]) {
+            const int16_t room = r - left;
+            tw = draw_band_text(t.title, st.title, ti, st.title_n, left, 0, false, u.y + g.title_top, g.title_h,
+                                fits || !t.value[0] ? room : room * 3 / 5) + TILES_GAP;
+        }
+        if (t.value[0]) draw_band_text(t.value, st.value, vi, st.value_n, 0, r, true, u.y + g.value_top, g.value_h, r - left - tw);
+    } else {
+        if (t.title[0]) draw_band_text(t.title, st.title, 0, st.title_n, left, 0, false, u.y + g.title_top, g.title_h, max_w);
+        if (g.rows == 2) {
+            // the bottom row: value left, change right
+            tiles_fit_row(tiles_measure, nullptr, nullptr, t.value, t.change, &st, max_w, TILES_GAP, extra, &ti, &vi, &ci);
+            int16_t r = right;
+            if (t.change[0]) r -= draw_tile_change(t, st, ci, r, u.y + g.change_top, g.change_h, max_w, fg) + TILES_GAP;
+            if (t.value[0])  draw_band_text(t.value, st.value, vi, st.value_n, left, 0, false, u.y + g.value_top, g.value_h, r - left);
+        } else {
+            // a tall cell: value band left, change band right
+            if (t.value[0])  draw_band_text(t.value, st.value, 0, st.value_n, left, 0, false, u.y + g.value_top, g.value_h, max_w);
+            if (t.change[0]) draw_tile_change(t, st, 0, right, u.y + g.change_top, g.change_h, max_w, fg);
+        }
+    }
+    canvas.setTextColor(CV_BLACK);
+}
+
+// The tile frame; `badges_x` = where the badges begin (SCREEN_W without the status band).
+static void draw_tiles(int16_t badges_x) {
+    static const GFXfont* const kSmall[] = { &FreeSansBold9pt7b };
+    const uint8_t L = _tiles.layout;
+    if (L == TILE_LAYOUT_1X2 || L == TILE_LAYOUT_2X2) canvas.drawFastVLine(GRID_CELL_W, 0, SCREEN_H, CV_BLACK);
+    if (L == TILE_LAYOUT_2X1 || L == TILE_LAYOUT_2X2) canvas.drawFastHLine(0, GRID_CELL_H, SCREEN_W, CV_BLACK);
+    for (uint8_t i = 0; i < _tiles.n && i < TILES_MAX; i++) draw_tile_cell(i, _tiles.t[i]);
+    if (!_tiles.status) return;
+    char age[24];
+    uint32_t a = ticker_total_age_s();
+    ticker_age_line(a, a >= _stale_ms / 1000, age, sizeof(age));
+    if (age[0]) {
+        TileRect c;
+        tiles_cell_rect(L, tiles_status_cell(L), &c);
+        const int16_t x = c.x + TILES_PAD;
         print_fitted(age, x, SCREEN_H - 3, kSmall, 1, badges_x - 6 - x);
     }
 }
@@ -797,18 +939,20 @@ static void draw_base(uint8_t event) {
         if (_card == CARD_POWER_BATTERY) event = RP_EV_SERVICE;
         else { event = RP_EV_CONDITION; condition = true; }
     } else {
-        bool has = _last_title[0] || _last_message[0] || _grid_on;
+        bool has = _last_title[0] || _last_message[0] || _grid_on || _tiles_on;
         if (_grid_on) draw_grid(draw_badges());         // the badges first: the age line fits before them
+        else if (_tiles_on) draw_tiles(_tiles.status ? draw_badges() : SCREEN_W);   // status off: no badges, no age line
         else {
             if (has) draw_content();
             else draw_waiting();
             draw_badges();
         }
         _state = has ? SCREEN_CONTENT : SCREEN_WAITING;
-        kind = has ? (_grid_on ? SHOWN_GRID : _tk.ticker ? SHOWN_TICKER : SHOWN_TEXT) : SHOWN_WAITING;
+        kind = has ? (_grid_on ? SHOWN_GRID : _tiles_on ? SHOWN_TILES : _tk.ticker ? SHOWN_TICKER : SHOWN_TEXT) : SHOWN_WAITING;
         // the title and the badge name: another name on the badge is a layout change too;
-        // for the grid the set and order of the names
+        // for the grid the set and order of the names, for tiles their key (names, styles, preset)
         if (_grid_on) title = grid_set_key(&_grid);
+        else if (_tiles_on) title = tiles_frame_key(&_tiles);
         else if (_tk.ticker) {
             title = esp_rom_crc32_le(0, (const uint8_t*)_last_title, strlen(_last_title));
             title = esp_rom_crc32_le(title, (const uint8_t*)_tk.short_label, strlen(_tk.short_label));
@@ -944,7 +1088,7 @@ void display_set_stale_ms(uint32_t ms) {
 }
 
 bool display_stale_crossed() {
-    bool shows_age = _tk.ticker && _content_at_ms != 0 && !_tk.time[0];
+    bool shows_age = _tk.ticker && _content_at_ms != 0 && !_tk.time[0] && !(_tiles_on && !_tiles.status);
     return ticker_stale_crossing(&_stale_fired, shows_age, ticker_total_age_s(), _stale_ms / 1000);
 }
 
@@ -954,6 +1098,7 @@ void display_show_content(const char* title, const char* message, const TickerFi
     if (t && t->ticker) _tk = *t;
     else { memset(&_tk, 0, sizeof(_tk)); _tk.age_s = TICKER_AGE_UNKNOWN; }
     _grid_on = false;
+    _tiles_on = false;
     _content_at_ms = millis();
     if (!_content_at_ms) _content_at_ms = 1;
     _stale_fired = false;   // new content: its own crossing may ask once more
@@ -966,6 +1111,7 @@ void display_show_grid(const GridFrame* g) {
     _grid = *g;
     if (_grid.n > GRID_MAX) _grid.n = GRID_MAX;
     _grid_on = true;
+    _tiles_on = false;
     _last_title[0] = '\0';                       // the symbols, comma-separated: the shelf's Showing line
     for (uint8_t i = 0; i < _grid.n; i++) {
         if (i) strlcat(_last_title, ", ", sizeof(_last_title));
@@ -983,6 +1129,26 @@ void display_show_grid(const GridFrame* g) {
     draw_base(RP_EV_CONTENT);
 }
 
+void display_show_tiles(const TilesFrame* f, const char* title) {
+    _tiles = *f;
+    if (_tiles.n > TILES_MAX) _tiles.n = TILES_MAX;
+    _tiles_on = true;
+    _grid_on = false;
+    // the Showing line: the payload's title, else the titles of the cells
+    if (title && title[0]) strlcpy(_last_title, title, sizeof(_last_title));
+    else tiles_join_titles(&_tiles, _last_title, sizeof(_last_title));
+    _last_message[0] = '\0';
+    memset(&_tk, 0, sizeof(_tk));
+    _tk.ticker = true;                           // the age line and the stale crossing work as for one ticker
+    _tk.age_s = f->age_s;
+    _content_at_ms = millis();
+    if (!_content_at_ms) _content_at_ms = 1;
+    _stale_fired = false;
+    _content_seq++;
+    _card = CARD_NONE;
+    draw_base(RP_EV_CONTENT);
+}
+
 void display_show_base() {
     draw_base(RP_EV_RESTORE);
 }
@@ -992,6 +1158,7 @@ void display_clear_content() {
     _last_message[0] = '\0';
     _tk.ticker = false;
     _grid_on = false;
+    _tiles_on = false;
     _content_at_ms = 0;
     _stale_fired = false;
 }
@@ -1078,6 +1245,7 @@ void display_get_state(DisplayState* out) {
     out->ticker = _tk.ticker ? &_tk : nullptr;
     out->ticker_age_s = _tk.ticker ? ticker_total_age_s() : 0;
     out->grid = _grid_on ? &_grid : nullptr;
+    out->tiles = _tiles_on ? &_tiles : nullptr;
 }
 
 void display_prepare_sleep() {

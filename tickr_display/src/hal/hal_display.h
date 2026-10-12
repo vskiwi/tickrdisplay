@@ -4,6 +4,7 @@
 #include "../logic/ui_strings.h"      // ScreenState
 #include "../logic/device_state.h"    // ScreenCard (the condition cards)
 #include "../logic/ticker.h"          // TickerFields (the ticker look)
+#include "../logic/tiles.h"           // TilesFrame (a payload's tile layout)
 // GxEPD2 is deliberately NOT included here: its headers carry a global
 // `#pragma GCC diagnostic ignored "-Wunused-parameter"` that would silence
 // warnings in every translation unit pulling this header. The panel driver
@@ -50,6 +51,13 @@ void display_show_content(const char* title, const char* message, const TickerFi
 // refresh policy, the set and order of the names its "title". The stored
 // title becomes the comma-separated symbols (the shelf's Showing line).
 void display_show_grid(const GridFrame* g);
+// A payload's tile frame (docs/API.md "Tile layouts"): the preset's cells drawn
+// with the tile looks (logic/tiles.h), the status band (badges + age line) in
+// the bottom-right cell when f->status is set. `title` (may be NULL) is the
+// payload's root title for the Showing line; without one the titles of the
+// cells are joined. Stored and drawn with one refresh; its own layout kind,
+// tiles_frame_key() its "title" for the refresh policy.
+void display_show_tiles(const TilesFrame* f, const char* title);
 // T_stale for the ticker's age line (docs/DEVICE_UI.md "E-ink refresh rules": 3 x refresh interval,
 // min 10 min - device_stale_ms()). Past it the line reads "stale N min".
 void display_set_stale_ms(uint32_t ms);
@@ -155,5 +163,6 @@ struct DisplayState {
     const TickerFields* ticker;      // the ticker fields when the content is a ticker frame, else NULL ("layout")
     uint32_t      ticker_age_s;      // total age of the quote: payload age_s + time on the panel ("age_s")
     const GridFrame* grid;           // the cells when the content is a grid frame (layout "grid"), else NULL
+    const TilesFrame* tiles;         // the cells when the content is a tile frame (layout = the preset name), else NULL
 };
 void display_get_state(DisplayState* out);

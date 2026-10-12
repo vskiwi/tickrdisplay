@@ -140,10 +140,21 @@ static void handle_state(AsyncWebServerRequest* request) {
     // (-1|0|1) and age_s (the quote's total age: payload age_s + time on the panel);
     // for a grid frame symbols[] and shorts[] in cell order (docs/TICKERS.md
     // "Several tickers on one panel: the 2x2 grid") and age_s of the oldest quote.
+    // For a tile frame (docs/API.md "Tile layouts") layout is the preset name
+    // ("2x2"), tiles the filled cells, status_band the payload's `status`
+    // (`status` here is the badge snapshot), symbols[] the titles.
     body += ",\"layout\":\"";
-    body += st.grid ? "grid" : st.ticker ? "ticker" : "text";
+    body += st.tiles ? tile_layout_str(st.tiles->layout) : st.grid ? "grid" : st.ticker ? "ticker" : "text";
     body += '"';
-    if (st.grid) {
+    if (st.tiles) {
+        uint8_t filled = 0;
+        for (uint8_t i = 0; i < st.tiles->n && i < TILES_MAX; i++) filled += st.tiles->t[i].has ? 1 : 0;
+        snprintf(num, sizeof(num), ",\"tiles\":%u,\"status_band\":%s,\"symbols\":[", (unsigned)filled, st.tiles->status ? "true" : "false");
+        body += num;
+        for (uint8_t i = 0; i < st.tiles->n && i < TILES_MAX; i++) { if (i) body += ','; json_str(body, st.tiles->t[i].has ? st.tiles->t[i].title : ""); }
+        snprintf(num, sizeof(num), "],\"age_s\":%lu", (unsigned long)st.ticker_age_s);
+        body += num;
+    } else if (st.grid) {
         body += ",\"symbols\":[";
         for (uint8_t i = 0; i < st.grid->n; i++) { if (i) body += ','; json_str(body, st.grid->cells[i].symbol); }
         body += "],\"shorts\":[";
