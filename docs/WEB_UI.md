@@ -70,7 +70,13 @@ it. Everything about the fleet is on the toolbar and in the drawer.
    separator, LED rule, LED on battery – `off`, or `hold` the colour through
    the deep sleep down to 30 %, which shortens battery life several times;
    [`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*) → *Save*
-   ([`TICKERS.md`](TICKERS.md) → *Setting it up in the web UI*). *Custom JSON URL*: URL + interval → *Save*.
+   ([`TICKERS.md`](TICKERS.md) → *Setting it up in the web UI*). *Custom JSON URL*: URL + interval → *Save*
+   (what the URL must return and a complete example server: [`INTEGRATION_EXAMPLE.md`](INTEGRATION_EXAMPLE.md)).
+   The hint under the field shows the shape – one JSON object,
+   `{"title":…,"value":…}` – and links to [`API.md`](API.md) → *Payload
+   format*; *Test* fetches the typed URL once on the device through the
+   payload parser (nothing saved) and shows the title / value it would draw,
+   or the parser's reason (`root must be a JSON object`).
    *MQTT* shows broker and topic with a link to that device's `/system`;
    *Push only* shows a ready `curl` line.
 4. The card's next frame poll shows the result.

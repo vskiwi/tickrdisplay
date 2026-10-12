@@ -35,28 +35,37 @@ topic, from the Pull URL and from a relay. ≤ **4096 bytes**, standard JSON
 (no comments), must be an object with at least one recognised field;
 unknown fields are ignored. The document is validated completely before
 anything is drawn or played – an invalid one is rejected and nothing changes.
+A rejected document names its reason (`root must be a JSON object`, `no
+recognised fields (…)`, `value: too long`) in the `400` body of `POST
+/api/screen`, and in `last_error` of `GET /api/status` for every path: a
+rejected Pull URL body is a failed pull (`pull: root must be a JSON object`)
+and backs off like an HTTP error – [`TICKERS.md`](TICKERS.md) → *Fetch
+schedule and errors*. `POST /api/pull/test` shows the verdict for a URL
+before it is saved.
 
 ```json
 {"title":"Bitcoin","value":"$95,240","change":"+0.07%","dir":1,"age_s":120,
- "spark":[83950,83990,84001],"alert":{"led":"00FF00","sound":"double_beep","volume":128}}
+ "spark":[83950,83990,84001],
+ "alert":{"led":"00FF00","brightness":128,"sound":"double_beep","volume":128}}
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `title` | string or number | Heading line, ≤ 63 chars |
-| `value` | string or number | Main text, ≤ 127 chars. The screen is redrawn when `title` and/or `value` is present (a missing one is drawn empty) |
+| `title` | string or number | Heading line, ≤ 63 bytes |
+| `value` | string or number | Main text, ≤ 127 bytes. The screen is redrawn when `title` and/or `value` is present (a missing one is drawn empty) |
 | `alert.led` | string | LED colour `RRGGBB`, optional leading `#` (`000000` = off). Kept until the next payload changes it |
-| `alert.sound` | string | Preset `beep` (2 kHz, 100 ms), `double_beep`, `long_beep` (500 ms), `none`, or an **RTTTL** melody: ≤ 1024 chars, ≤ 512 notes, `d` ∈ {1,2,4,8,16,32}, `o` 4–7, `b` 25–900, total ≤ 15 s. An unknown preset or invalid melody is ignored with a `warning` in the response; the rest of the payload is applied |
+| `alert.brightness` | integer 0–255 | Scales the LED colour – `alert.led` or the colour of the device's LED rule – for this and later payloads; each channel is `value × brightness / 255`. Default 255; `0` keeps the colour but drives the LED dark, so a later non-zero value restores it without resending `led`. Not stored across a restart. Overlays and blinks (OTA, pairing, identify, the end-of-wake blink) are not scaled; in deep sleep `led_battery = hold` holds the full colour regardless of the brightness, and holds nothing at `0` ([`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*) |
+| `alert.sound` | string | Preset `beep` (2 kHz, 100 ms), `double_beep`, `long_beep` (500 ms), `none`, or an **RTTTL** melody: ≤ 1023 bytes, ≤ 512 notes, `d` ∈ {1,2,4,8,16,32}, `o` 4–7, `b` 25–900, total ≤ 15 s. An unknown preset or invalid melody is ignored with a `warning` in the response; the rest of the payload is applied |
 | `alert.volume` | integer 0–255 | DAC amplitude for this and later sounds. Default 255 |
-| `change` | string (≤ 15 chars) or number | Printed as given (`"+0.07%"`); **selects the ticker layout**. `""` is recognised but draws nothing |
+| `change` | string (≤ 15 bytes) or number | Printed as given (`"+0.07%"`); **selects the ticker layout**. `""` is recognised but draws nothing |
 | `dir` | `-1` · `0` · `1` or `"down"` · `"flat"` · `"up"` | Triangle direction and LED rule; derived from the sign of `change` when absent |
-| `age_s` | integer ≥ 0 | Age of the quote when sent; the device adds the time since and shows *just now* / `N min ago` / `N h ago`, or *stale* once older than 3 × the refresh interval (min 10 min) |
-| `time` | string ≤ 15 chars | Shown verbatim instead of the relative age |
+| `age_s` | number ≥ 0 | Age of the quote when sent; the device adds the time since and shows *just now* / `N min ago` / `N h ago`, or *stale* once older than 3 × the refresh interval (min 10 min) |
+| `time` | string (≤ 15 bytes) or number | Shown verbatim instead of the relative age |
 | `spark` | array of numbers | Sparkline; the first 48 numeric elements are kept, non-numbers skipped. **Selects the ticker layout** |
 | `short` | string ≤ 7 printable ASCII chars (or number) | Name on the badge of a ticker frame (`"BTC"`), white on black top left; absent = no badge, the frame as without it. Does not select the layout by itself |
 
-Fields are applied in the order volume → LED (or the device's LED rule) →
-sound → screen. Payloads are queued (depth 8) and executed from the main
+Fields are applied in the order volume → brightness → LED (or the device's
+LED rule) → sound → screen. Payloads are queued (depth 8) and executed from the main
 loop; an identical rendered frame is not redrawn (see
 [`DEVICE_UI.md`](DEVICE_UI.md) → *E-ink refresh rules*).
 
@@ -97,6 +106,7 @@ browser keeps the token in `localStorage`.
 | `GET` | `/api/status` | public | `uptime_s`, `heap_free`, `heap_min_free`, `rssi`, `ip`, `power` (`usb`·`battery`·`unknown`), `power_mode` (override `auto`·`usb`·`battery`), `board` (`A`·`B`·`?`), `vsys_v` (cell) and `vin_v` (rail) – `null` on board `?`, `cell_divider` (the cell divider in effect, `"189/100"` on rev A, `"200/100"` on rev B, or the configured one – [`HARDWARE.md`](HARDWARE.md) → *Power sensing*), `pull_https`, `tls_ca`, `mqtt_enabled`, `mqtt_connected`, `mqtt_state`, `queue_depth`, `queue_dropped`, `auth_enabled`, `tls_insecure_used`, `reset_reason` (`esp_reset_reason_t` of this boot: `1` power-on, `3` software, `4` panic, `5`/`6`/`7` watchdogs, `8` deep-sleep wake-up, `9` brownout), `boot_count` (boots since power-on, deep-sleep wake-ups not counted), `crash_count` (of those: panic, watchdog or brownout) and `crash_last_reason` (`reset_reason` code of the last crash, `0` = none) – kept across every reset but a power-on, so a reboot loop stays visible after it ended, `loop_stack_min_free` (bytes of the main task's stack never used since boot), `last_error`, `wifi_disconnects` (losses of a link that had an address), `wifi_last_reason` (driver reason code of the last one, `wifi_err_reason_t`; `0` = the address was lost while still associated, or none yet), `wifi_down_s` (seconds since the current outage began, `0` when up), `wifi_reconnects` (outages ended after the firmware's own reconnect), `wifi_restarts` (restarts after 30 min without a link) – counters kept across software restarts and deep sleep, zero after a power-on ([`DEVICE_UI.md`](DEVICE_UI.md) → *Wi-Fi link supervision*), `led {r,g,b}` (the colour actually driven, overlays included), `peers {count, fresh, members, sent, send_failed, received, verified, dropped, period_s, broadcast, running}` |
 | `GET` | `/api/config` | token | Settings without secrets: `mqtt_server`, `mqtt_port`, `mqtt_topic`, `mqtt_user`, `pull_url`, `refresh_interval` (min, 1–1440), `adc_cell_num`, `adc_cell_den` (cell divider override; `0`/`0` = auto, the board's divider), `led_rule` (`off`·`sign`), `led_battery` (`off`·`hold` – the LED through deep sleep, [`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*), `source_kind`, `tk_preset` (`coingecko`·`kraken`·`binance`·`binance_usdm`·`binance_coinm`·`custom`), `tk_symbol`, `tk_market`, `tk_url`, `tk_price`, `tk_change`, `tk_spark`, `tk_mode`, `tk_decimals` (255 = auto), `tk_sep`, `tk_label`, `tk_short` (badge name ≤ 7 chars, `""` = derived from the symbol); the 2×2 grid ([`TICKERS.md`](TICKERS.md) → *Several tickers on one panel: the 2×2 grid*): `tk_view` (`single` · `grid`), `tk_n` (1–4 ticker rows) and the rows 1–3 as `tk1_preset` … `tk1_short`, `tk2_*`, `tk3_*` – the same twelve fields as `tk_*`, always present; flags `mqtt_pass_set`, `tls_ca_set`, `api_token_set`, `ota_password_set`, `group_set`, `tk_api_key_set`, `arduino_ota_build` |
 | `POST` | `/config` | token | Save settings – form fields named as above plus the secrets `mqtt_pass`, `api_token`, `ota_password`, `tls_ca_pem`, `tk_api_key` (an empty field keeps the stored value; `<field>_clear=1` erases it). Validated as a whole; `400` with the reasons, else `200`. A changed Pull URL, ticker source, grid view / rows or interval fetches at once on USB. Rows the grid shows (`tk_view=grid`, index below `tk_n`) must resolve like `tk_*` (`ticker 2: symbol required`); other rows are stored as posted. The power-source override is `POST /api/power/source` |
+| `POST` | `/api/pull/test` | token | Form field `pull_url` (`http://` or `https://`, ≤ 127 chars) – one GET of that URL through the payload parser, nothing saved or drawn (≤ ≈ 10 s; the same transport as the scheduled pull – [`TICKERS.md`](TICKERS.md) → *TLS*): `{"ok":true,"title":"…","value":"…","layout":"text"·"ticker","bytes":73,"url":"…","ms":412}` (`layout` = what the payload would select; `warning` added for an ignored `alert.sound`) or `{"ok":false,"error":"root must be a JSON object","url":"…","ms":398}` – the error is the parser's text ([Payload format](#payload-format)) or the fetch reason without the `pull:` prefix ([`TICKERS.md`](TICKERS.md) → *Fetch schedule and errors*). `400` missing / malformed URL, `409` while another test runs |
 | `POST` | `/api/source/test` | token | Form fields of a ticker source (`tk_preset`, `tk_symbol`, `tk_market`, `tk_label`, `tk_short`, `tk_decimals`, `tk_sep`; `tk_url`, `tk_price`, `tk_change`, `tk_mode`, `tk_spark` for `custom`) – one fetch now, nothing saved (≤ ≈ 20 s; two requests for a futures perpetual): `{"ok":true,"price":"…","change":"…","dir":1,"label":"…","short":"BTC","url":"…","ms":812}` (`short` = the badge name the device would draw: the posted one or the derived default, [`TICKERS.md`](TICKERS.md) → *What the screen shows*) – the futures presets add `"funding":"FR +0.0048%"` (`""` when only the funding request failed) – or `{"ok":false,"error":"http 451","url":"…","ms":…}`. `400` invalid source, `409` while a test runs |
 | `GET` | `/api/identity` | public | `id` (`tickr-XXXXXX` from the MAC), `name`, `mac`, `ip`, `version`, `power`, `board`, `sleep_s`, `relay` (USB group member), `pairable` (USB power), `group` (`null` or `{id,name,epoch}` – never the secret), `layout {x,y,group}`, `screen {width,height,format}`, `caps` (`screen_raw`, `screen_bmp`, `peers_v1`, `pair_v1`, `layout_v1`, `relay_v1`, `update_url_v1`), `max_peers`, `uptime_s` |
 | `POST` | `/api/identity` | token | `{"name":"Kitchen left","layout":{"x":0,"y":0,"group":"shelf"}}` (JSON or form fields `name`, `layout_x`, `layout_y`, `layout_group`): rename / set the shelf slot (`x`,`y` 0–15). The name also becomes the DHCP hostname `<name>-XXXXXX` from the next boot ([`DEVICE_UI.md`](DEVICE_UI.md) → *Wi-Fi link supervision*) |

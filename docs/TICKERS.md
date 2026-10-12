@@ -19,7 +19,8 @@ no server of your own. The payload fields a proxy can send (`change`, `dir`,
   named as small JSON paths – a public API or a proxy on your LAN.
 * The source produces the same payload a proxy would send, so a Node-RED or
   Home Assistant flow (Appendices A, B) renders identically – the route for
-  stocks, indices or anything that needs an API key.
+  stocks, indices or anything that needs an API key. Writing such a proxy
+  yourself: [`INTEGRATION_EXAMPLE.md`](INTEGRATION_EXAMPLE.md).
 
 ## 2. Presets
 
@@ -286,6 +287,7 @@ without the prefix:
 | `price path` / `change path` | nothing at that path – usually a wrong symbol (Binance's error object, CoinGecko's `{}`) |
 | `price not a number` / `change not a number` | the value there is not numeric, or the open price is 0 |
 | `ticker not configured` · `no wifi` | the saved source does not resolve (no symbol / no price path) · *Test* only, the device is not connected |
+| `root must be a JSON object` · `no recognised fields (…)` · `<field>: too long` | *Custom JSON URL* (Pull URL) only: the body came back but is not a payload ([`API.md`](API.md) → *Payload format*) – a top-level array, or an object without `title` / `value` / the other payload keys. Counts as a miss like an HTTP error; the frame stays |
 | `#2 http 451` (any reason with a `#N`) | the grid's row N failed this cycle; the other cells were drawn |
 
 ## 8. TLS

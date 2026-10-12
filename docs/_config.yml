@@ -21,6 +21,8 @@ exclude:
   - DEVICE_UI.md
   - FLASHING.md
   - HARDWARE.md
+  - INTEGRATION_EXAMPLE.md
+  - examples/
   - LEGAL.md
   - MANUAL_TESTS.md
   - MULTI_DEVICE.md

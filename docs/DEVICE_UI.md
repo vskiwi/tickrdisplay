@@ -371,7 +371,7 @@ colour actually driven, overlay included.
 | 9 | ON BATTERY card | amber flash 0.5 s when the card is drawn | none |
 | 10 | Battery wake end | red 300 ms after a miss; green 300 ms after a success unless the `sign` rule coloured the LED (then that colour simply stays); the base colour returns after the blink | none |
 | 11 | Deep sleep (`led_battery`) | `off`: the LED pins are held dark; `hold`: the base colour is held lit, full on per channel (no PWM in deep sleep), while the level is ≥ 30 %, dark below | none |
-| base | CONTENT | `alert.led`, or red / green by `dir`; off when the rule is `off` | payload `alert.sound` |
+| base | CONTENT | `alert.led`, or red / green by `dir`; off when the rule is `off`. Scaled by the payload's `alert.brightness` (0–255, default 255, kept until changed – [`API.md`](API.md) → *Payload format*); the rows above are not scaled | payload `alert.sound` |
 
 A fetch / extract error never turns the LED red (red means "down");
 overlays run on USB only except 6, 10 and 11; sound is never used for
@@ -398,9 +398,10 @@ rule; `GET /api/config` / `POST /config`):
   the bar is lit only during the few seconds of a wake-up.
 * **`hold`**: the base colour stays lit through the sleep, each channel
   fully on or off (deep sleep has no PWM, so `alert.led` colours are
-  rounded to the nearest of the eight pure colours), as long as the level
-  read at the wake is **30 % or more**; below that the pins are held dark
-  until the cell is charged again. The held colour survives the next
+  rounded to the nearest of the eight pure colours, and `alert.brightness`
+  is not applied – except that a brightness of `0` holds nothing), as long
+  as the level read at the wake is **30 % or more**; below that the pins
+  are held dark until the cell is charged again. The held colour survives the next
   wake-up without a blink: the pins come up at the same levels and the
   frame sets the new colour over them. With `led_rule = off` and a ticker
   source there is no colour to hold – the setting only matters with the
@@ -452,6 +453,12 @@ frame, so the shelf shows the sleeper's last card.
 > 3 min) are host-tested; the bench exercises the battery flow through the
 > `power_source` override on USB power, where the sleep itself cannot be
 > watched and the switch is not involved.
+
+> **Unverified:** `alert.brightness` in **deep sleep** – `led_battery = hold`
+> holding the full colour at a non-zero brightness and holding nothing at
+> `0` – has not been run through a sleep; the scaled levels while awake were
+> read from the driven PWM duty (`GET /api/status` → `led`), not judged on
+> the bar by eye.
 
 > **Unverified:** the LED breathe period (2 s) and the amber tint
 > (255, 120, 0) have not been judged on the bar; the double full after a
