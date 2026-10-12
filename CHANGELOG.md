@@ -8,6 +8,31 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-10-12
+
+### Added
+
+- **Payload**: tile layouts – a payload with `tiles` (up to four objects
+  of `title` / `value` / `change` / `dir`, `null` for an empty cell) is
+  drawn as a frame of cells: presets `1x1`, `1x2`, `2x1`, `2x2` (`layout`),
+  per-tile and payload-level `style` with the looks `stack` / `row` /
+  `ticker`, a `size` cap and `invert` (white on black), `status` to hide
+  the badges and the age line. The sender picks the tiles, the device fits
+  the fonts; new numbers in the same cells refresh partially. The root
+  `value` and ticker fields next to `tiles` are ignored with a warning.
+- **API**: `POST /api/pull/test` and `GET /api/screen/state` name the tile
+  preset in `layout` and report `tiles` (filled cells); the state adds
+  `status_band` and the titles in `symbols[]`.
+- **Web UI**: the *Test* result of a Custom JSON URL names the tile preset
+  and the number of filled cells (`OK (2x2, 3 tiles, …)`).
+- **Docs**: the tile-layout reference in `docs/API.md` (presets with cell
+  sizes, fields, style layering, font ladders, refresh identity, every
+  rejection text, API responses); the integration guide gains a sketch of
+  every look, sender guidance for the cell sizes, a worked example per
+  preset plus `curl` and MQTT variants, a JSON Schema of the whole payload
+  and an LLM prompt that covers tiles; the example Pull URL server sends
+  the top four movers as tiles with `GRID=1`.
+
 ## [0.4.0] - 2026-10-12
 
 ### Added
@@ -255,7 +280,8 @@ the day of the release; the development history before it was private.
   gate for the web UI; `TICKR_LOG_VERBOSE` build flag for the informational
   serial log.
 
-[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.2.0...v0.3.0
