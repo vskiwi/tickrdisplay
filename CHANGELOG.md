@@ -8,6 +8,38 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-10-12
+
+### Added
+
+- **LED**: the payload field `alert.brightness` (integer 0–255, default
+  255) scales the LED colour – a payload's `alert.led` or the colour of the
+  `sign` rule – for this and later payloads, like `alert.volume` does for
+  sound. `0` keeps the colour but drives the LED dark. Overlays and blinks
+  are not scaled, and `led_battery = hold` holds the full colour through
+  deep sleep (nothing at `0`).
+- **API**: `POST /api/pull/test` – one fetch of a Pull URL through the
+  payload parser without saving it; answers the title / value the frame
+  would get, or the parser's reason (`root must be a JSON object`).
+- **Web UI**: the *Custom JSON URL* editor has a *Test* button on that
+  route, and its hint shows the payload shape the URL must answer with
+  (one JSON object with `title` / `value`) with a link to the payload
+  format.
+
+### Fixed
+
+- **Pull URL**: a body the device fetched but could not use as a payload
+  (a top-level array, an object without any payload field) was dropped
+  with no trace outside the serial log – `last_error` stayed empty and the
+  pull counted as a success. It is now a failed pull: `last_error` carries
+  `pull: <parser reason>`, the scheduler backs off as after an HTTP error,
+  and the panel's *Last error* shows it.
+- **API**: a `POST /api/source/test` (or `/api/pull/test`) started while
+  another test was still fetching was accepted instead of refused with
+  `409`; it took over the running test's parameters and its answer, and
+  the first caller never got a reply. The guard now lasts until the answer
+  is sent.
+
 ## [0.3.1] - 2026-10-11
 
 ### Fixed
@@ -223,7 +255,8 @@ the day of the release; the development history before it was private.
   gate for the web UI; `TICKR_LOG_VERBOSE` build flag for the informational
   serial log.
 
-[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.1.0...v0.2.0
