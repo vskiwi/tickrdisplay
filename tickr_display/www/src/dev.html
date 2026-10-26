@@ -56,7 +56,7 @@ function init(){load();if(!T)fetch('/api/status').then(function(r){return r.json
   <div class="row"><input type="checkbox" id="c_red" onchange="led('red')"><label class="r">Red</label><input type="range" id="v_red" min="0" max="255" value="255" oninput="led('red')"></div>
   <div class="row"><input type="checkbox" id="c_green" onchange="led('green')"><label class="g">Green</label><input type="range" id="v_green" min="0" max="255" value="255" oninput="led('green')"></div>
   <div class="row"><input type="checkbox" id="c_blue" onchange="led('blue')"><label class="b">Blue</label><input type="range" id="v_blue" min="0" max="255" value="255" oninput="led('blue')"></div>
-  <div class="hint">Unticked = channel off.</div>
+  <div class="hint">Unticked = channel off. A test colour: shown for 10 s, then the LED goes back to what the device derives.</div>
 </div>
 <h3>Sound</h3>
 <div class="card w">

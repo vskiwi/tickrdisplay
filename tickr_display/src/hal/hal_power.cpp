@@ -32,7 +32,7 @@ static int32_t  s_boot_diff_min = 0, s_boot_diff_max = 0;
 // and left to float (= network off on rev B, no function on rev A).
 static const gpio_num_t kHeldPins[] = {
     (gpio_num_t)PIN_EPD_PWR,     // HIGH = display power OFF
-    (gpio_num_t)PIN_LED_RED,     // HIGH = LED off (active LOW); LOW = held lit (led_battery = hold)
+    (gpio_num_t)PIN_LED_RED,     // HIGH = LED off (active LOW); LOW = held lit (led_sleep = keep)
     (gpio_num_t)PIN_LED_GREEN,
     (gpio_num_t)PIN_LED_BLUE,
     (gpio_num_t)PIN_AMP_EN,      // LOW = amplifier off
@@ -64,7 +64,7 @@ bool power_sense_enabled() {
 }
 
 // The colour the LED pins were held at through the last deep sleep
-// (docs/DEVICE_UI.md "LED and sound", `led_battery = hold`): magic in the top
+// (docs/DEVICE_UI.md "LED and sound", `led_sleep = keep`): magic in the top
 // byte, R / G / B as 0 or 255 below. RTC slow memory: valid after a
 // deep-sleep wake, reloaded (zero) by every other reset.
 #define LED_HELD_MAGIC 0x4C000000u
@@ -311,8 +311,8 @@ void power_held_led(uint8_t* r, uint8_t* g, uint8_t* b) {
 
 void power_deep_sleep(uint64_t sleep_time_us, uint8_t led_r, uint8_t led_g, uint8_t led_b) {
     // LEDs: detach PWM so the pads are plain GPIO again, then drive the
-    // level the sleep keeps - off, or the full-on colour of `led_battery =
-    // hold` (no PWM in deep sleep); remembered for the next boot's pre-load.
+    // level the sleep keeps - off, or the full-on colour of `led_sleep =
+    // keep` (no PWM in deep sleep); remembered for the next boot's pre-load.
     ledcDetachPin(PIN_LED_RED);
     ledcDetachPin(PIN_LED_GREEN);
     ledcDetachPin(PIN_LED_BLUE);

@@ -351,31 +351,85 @@ per verdict (`Refresh: partial (event 0, 3 partials since full)`).
 
 ## LED and sound
 
-`hal_indication` keeps **one base colour** (the payload's `alert.led`, or
-red / green by direction when `led_rule = sign`) and an **overlay layer**
-with a priority mask and a one-shot flash; `indication_loop()` drives
-blink / breathe / pulse from the main loop. The lowest number wins; the
-base colour returns after every overlay. `GET /api/status.led` reports the
-colour actually driven, overlay included.
+The LED colour is **derived**, not accumulated: `hal_indication` drives
+whatever layer is on top of four, and the lowest layer – the content
+colour – is recomputed from the device setting **`led_mode`** and the
+inputs of the *current* screen after every render and after every change
+of the LED settings. Nothing a payload, a fetch or a test once wrote
+survives on its own: when the derivation yields no colour, the LED is dark.
+
+```
+led = dim(led_brightness, flash ?? overlay ?? test ?? content(led_mode, current screen))
+```
+
+| Layer | What | Ends |
+|---|---|---|
+| flash | one-shot colour (update outcome, pairing outcome, battery wake blink, the ON BATTERY amber) | after its time |
+| overlay | the system states of the table below, by priority; shown at **every** `led_mode` | with the state |
+| test | the colour of `/api/test/led_*` or the device sheet's *Test* | after 10 s (a blink route: 500 ms) |
+| content | derived from `led_mode` + the current screen; scaled by the payload's `alert.brightness` | with the next render / setting |
+
+Every layer is then dimmed by the device setting **`led_brightness`**
+(0–255, default 255; device sheet → *LED* → *Brightness*, `GET /api/config`
+/ `POST /config`): one persistent dimmer, kept in the configuration across
+payloads and restarts; `0` keeps the bar dark in every state. The driver
+writes the PWM duty only when the colour changes, but it does not trust the
+hardware forever: the duty is written again right after the LED pins are
+attached at boot and once a minute from the main loop. Every change of the
+content colour logs one serial line with its source (`LED: base 255/0/0 <-
+sign`).
+
+**Three settings** (device sheet → *LED*; the keys of `GET /api/config` /
+`POST /config`, [`API.md`](API.md) → *Status and configuration*):
+
+| Setting | Values | Meaning |
+|---|---|---|
+| `led_mode` | `off` (default) · `payload` · `sign` | `off`: the content never lights the LED – `alert.led` is ignored, only system overlays and tests show. `payload`: the colour is the current screen's `alert.led`; a screen without one is dark. `sign`: red when the lead ticker is down, green when up (the single ticker, the first grid cell, the first tile, a payload's `dir`); flat or no direction = dark; an `alert.led` on the screen wins |
+| `led_brightness` | 0–255 | the dimmer over every layer; `0` = the LED is dark whatever happens |
+| `led_sleep` | `off` (default) · `keep` | what the pins do in deep sleep – below, *On battery* |
+
+`GET /api/status` reports the colour actually driven (`led`), names the
+layer on top (**`led_source`**: the content layer's source `off` · `payload`
+· `sign` · `held`, `test`, an overlay's name or `flash`) and gives the parts
+it is made of (`led_base`, `led_overlays`, `led_brightness`,
+`led_held_boot`) – field by field in [`API.md`](API.md) → *Status and
+configuration*.
 
 | Priority | State | LED | Sound |
 |---|---|---|---|
-| 1 | OTA flashing | blue steady; success: green 3 s until the deferred restart | none |
+| 1 | OTA flashing | blue steady; success: green 3 s until the deferred restart; a failed update from a URL: red 1 s | none |
 | 2 | RECOVERY active | white, slow breathe (1 per 2 s) | none |
 | 3 | SETUP portal | white steady | none |
 | 4 | PAIRING code shown | amber steady; outcome: green 1 s / red 1 s | none |
 | 5 | IDENTIFY | white blink 1 Hz for the TTL | none |
 | 6 | BATTERY EMPTY | off | none |
 | 7 | BATTERY LOW badge | off | none |
-| 8 | OFFLINE (after `T_long`) | base colour off; one amber pulse every 10 s on USB | none |
+| 8 | OFFLINE (after `T_long`) | content colour off; one amber pulse every 10 s on USB | none |
 | 9 | ON BATTERY card | amber flash 0.5 s when the card is drawn | none |
-| 10 | Battery wake end | red 300 ms after a miss; green 300 ms after a success unless the `sign` rule coloured the LED (then that colour simply stays); the base colour returns after the blink | none |
-| 11 | Deep sleep (`led_battery`) | `off`: the LED pins are held dark; `hold`: the base colour is held lit, full on per channel (no PWM in deep sleep), while the level is ≥ 30 %, dark below | none |
-| base | CONTENT | `alert.led`, or red / green by `dir`; off when the rule is `off`. Scaled by the payload's `alert.brightness` (0–255, default 255, kept until changed – [`API.md`](API.md) → *Payload format*); the rows above are not scaled | payload `alert.sound` |
+| 10 | Battery wake end | red 300 ms after a miss; green 300 ms after a success unless `sign` coloured the LED (then that colour simply stays); the content colour returns after the blink | none |
+| 11 | Deep sleep (`led_sleep`) | `off`: the LED pins are held dark; `keep`: the derived colour is held lit, full on per channel (no PWM in deep sleep), while the level is ≥ 30 %, dark below; nothing is held when the derived colour is dark or either brightness is `0` | none |
+| test | `/api/test/led_*`, device sheet *Test* | the posted colour for 10 s (the `led_red` / `led_green` / `led_blue` blink routes: 500 ms), then the content colour | none |
+| content | CONTENT | derived from `led_mode` and the current screen (table above). Scaled by the payload's `alert.brightness` (0–255, default 255, kept until changed, reset to 255 by a restart – [`API.md`](API.md) → *Payload format*); the rows above are not scaled by it | payload `alert.sound` |
 
 A fetch / extract error never turns the LED red (red means "down");
-overlays run on USB only except 6, 10 and 11; sound is never used for
-conditions – it stays a payload matter.
+overlays run on USB only except 6, 7, 10 and 11 (the battery flow applies
+the BATTERY LOW rule once per wake-up, before the fetch) and row 1 for a
+firmware URL parked on the relay and flashed at a wake-up; sound is never
+used for conditions – it stays a payload matter.
+
+**Two brightnesses.** The payload's `alert.brightness` is the sender's
+knob: it scales the content colour only and is forgotten at a restart. The
+device's `led_brightness` is the owner's knob: it scales every layer,
+survives payloads and restarts, and is the way to dim or silence the bar
+on a device whose content keeps setting the colour. The *Test* colour in the
+device sheet is neither: it is a temporary layer that ends after 10 s, and
+it never changes what the content shows afterwards.
+
+**Changing a setting.** Saving `led_mode`, `led_brightness` or `led_sleep`
+derives the colour again from the screen that is on the panel – at once,
+without waiting for the next fetch or payload. `led_mode = off` on a device
+that showed red turns the LED off; `sign` on a device that shows a ticker
+colours it by the change already on the panel.
 
 **What `sign` compares.** The direction is the sign of the *change the
 source reports* – the 24 h change of CoinGecko / Binance, the change
@@ -383,32 +437,35 @@ against the day's open on Kraken, a payload's own `change` / `dir`
 ([`TICKERS.md`](TICKERS.md) → *Presets*). The firmware never compares one
 fetch with the previous one, so the colour does not flip on minute-to-minute
 noise; it changes only when the reported change crosses zero. A change that
-rounds to `0.00%` keeps the previous colour. Without a change (text
-payload, source without a change path) the rule writes nothing and the
-LED stays at the payload's `alert.led` or off. In the grid the first ticker
-decides.
+rounds to `0.00%` is flat: the LED is dark. Without a change (text payload,
+source without a change path) there is no direction and the LED is dark
+unless the screen carries an `alert.led`. In the grid the first ticker
+decides; a cell whose fetch failed this cycle keeps its last known
+direction while it shows the `?`.
 
-**On battery.** The base colour is written when the frame is rendered and
+**On battery.** The content colour is derived when the frame is rendered and
 shows while the panel refreshes (red / green under `sign`); then the wake
 ends with the row 10 blink and the device sleeps. What the bar does during
-the sleep is the setting **`led_battery`** (Content editor, next to the LED
-rule; `GET /api/config` / `POST /config`):
+the sleep is the setting **`led_sleep`** (device sheet → *LED* → *While
+asleep*; `GET /api/config` / `POST /config`):
 
 * **`off`** (default): the LED pins are held dark for the whole deep sleep –
   the bar is lit only during the few seconds of a wake-up.
-* **`hold`**: the base colour stays lit through the sleep, each channel
+* **`keep`**: the derived colour stays lit through the sleep, each channel
   fully on or off (deep sleep has no PWM, so `alert.led` colours are
-  rounded to the nearest of the eight pure colours, and `alert.brightness`
-  is not applied – except that a brightness of `0` holds nothing), as long
-  as the level read at the wake is **30 % or more**; below that the pins
-  are held dark until the cell is charged again. The held colour survives the next
-  wake-up without a blink: the pins come up at the same levels and the
-  frame sets the new colour over them. With `led_rule = off` and a ticker
-  source there is no colour to hold – the setting only matters with the
-  sign rule or a payload's `alert.led`. A lit LED is the largest steady
-  consumer of a sleeping device: expect the cell to last **several times
-  less** than with `off` – the LED's current has not been measured, so no
-  figure in days is given.
+  rounded to the nearest of the eight pure colours, and neither
+  `alert.brightness` nor `led_brightness` is applied – except that a
+  brightness of `0` on either holds nothing), as long as the level read at
+  the wake is **30 % or more**; below that the pins are held dark until the
+  cell is charged again. The held colour survives the next wake-up without a
+  blink: the pins come up at the same levels, the firmware takes them over
+  as the content layer (`led_source = held`) and the first render of the
+  wake derives the colour anew; with `led_mode = off` the held colour is
+  dropped as soon as the settings are read. With `led_mode = off` there is
+  never a colour to hold – the setting matters under `payload` and `sign`
+  only. A lit LED is the largest steady consumer of a sleeping device:
+  expect the cell to last **several times less** than with `off` – the
+  LED's current has not been measured, so no figure in days is given.
 
 A device that was running on USB keeps its colour for the grace after the
 cable is pulled (row 9, *Power-mode switch*) and then follows the setting
@@ -446,19 +503,28 @@ frame, so the shelf shows the sleeper's last card.
 > partial-refresh battery wake are host-tested only; the awake-time saving
 > of a partial wake (≈ 3.3 s) is an estimate from the driver constants.
 
-> **Unverified:** `led_battery = hold` on a real cell – the colour staying
-> lit through a deep sleep, coming up without a blink at the wake-up and
-> going dark below 30 % – and the settings window after the power switch
+> **Unverified:** `led_sleep = keep` on a real cell – the colour staying
+> lit through a deep sleep, coming up without a blink at the wake-up, being
+> re-derived by the first render and going dark below 30 % – and the settings window after the power switch
 > (the card with the address, the restart into the battery flow after
 > 3 min) are host-tested; the bench exercises the battery flow through the
 > `power_source` override on USB power, where the sleep itself cannot be
 > watched and the switch is not involved.
 
-> **Unverified:** `alert.brightness` in **deep sleep** – `led_battery = hold`
-> holding the full colour at a non-zero brightness and holding nothing at
-> `0` – has not been run through a sleep; the scaled levels while awake were
-> read from the driven PWM duty (`GET /api/status` → `led`), not judged on
-> the bar by eye.
+> **Unverified:** `alert.brightness` and `led_brightness` in **deep sleep** –
+> `led_sleep = keep` holding the full colour at a non-zero brightness and
+> holding nothing at `0` – have not been run through a sleep; the scaled
+> levels while awake were read from the driven PWM duty (`GET /api/status`
+> → `led`), not judged on the bar by eye. The device dimmer over the
+> overlays (a dimmed OTA blue, pairing amber, identify blink) and the
+> overlays at `led_mode = off` are *untested on hardware*.
+
+> **Unverified:** the PWM re-write – the duty written again right after the
+> LED pins are attached at boot and once a minute while awake – as the cure
+> for a LED that stayed lit although the driver believed it dark has been
+> reasoned from the LEDC attach behaviour and read back through
+> `GET /api/status` → `led`; the stale-duty case itself has not been
+> reproduced on the bench after the change.
 
 > **Unverified:** the LED breathe period (2 s) and the amber tint
 > (255, 120, 0) have not been judged on the bar; the double full after a

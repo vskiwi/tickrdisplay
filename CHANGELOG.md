@@ -8,6 +8,89 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **LED**: a *Brightness* setting (`led_brightness`, 0–255, default 255) –
+  a dimmer the device keeps in its configuration and applies to everything
+  the LED shows: the content colour (after the payload's
+  `alert.brightness`), the test colour, the system overlays and the
+  blinks; `0` keeps the bar dark in every state and holds nothing through
+  deep sleep. `led_brightness` in `GET /api/config` / `POST /config`
+  ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md) → *LED and sound*).
+- **API**: `GET /api/status` explains the LED colour it reports –
+  `led_source` (the layer on top: `off` · `payload` · `sign` · `held` ·
+  `test` · an overlay's name · `flash`), `led_base` (the derived content
+  colour before overlays, test colour and dimmer), `led_overlays` (the
+  active overlays as a bit mask), `led_brightness` (the dimmer in effect)
+  and `led_held_boot` (the colour the pins carried at boot); the serial
+  log prints one line per change of the content colour with its source
+  ([`docs/API.md`](docs/API.md) → *Status and configuration*).
+- **Tests**: `test_led_model` – the derived LED model on the host (mode ×
+  `alert.led` × direction, the held colour at boot, the sleep hold, the
+  setting words and the aliases of the former keys).
+
+### Changed
+
+- **LED model**: the LED colour is *derived*, not accumulated. The content
+  layer is recomputed from the device setting **`led_mode`** and the
+  current screen after every render and after every settings change; when
+  nothing yields a colour the LED is dark – a colour a payload, a fetch or
+  a test once wrote no longer survives on its own. `led_mode` is `off`
+  (the default: the content never lights the LED, `alert.led` is ignored),
+  `payload` (the current screen's `alert.led`) or `sign` (red / green by
+  the lead ticker's change – the single ticker, the first grid cell, the
+  first tile, a payload's `dir`; `alert.led` wins). System overlays
+  (update, recovery, set-up, pairing, identify, battery, offline) show at
+  every mode. A saved setting is applied at once from the screen on the
+  panel. Configuration schema 12: `led_rule` and `led_battery` in an
+  existing file migrate to `led_mode` (`off` → `off`, `sign` → `sign`) and
+  `led_sleep` (`off` → `off`, `hold` → `keep`)
+  ([`docs/DEVICE_UI.md`](docs/DEVICE_UI.md) → *LED and sound*).
+- **LED while asleep**: the setting is `led_sleep` (`off` · `keep`); `keep`
+  holds the *derived* colour through the deep sleep, the wake-up takes the
+  held colour over without a blink until the first render derives it anew,
+  and the mode `off` drops it as soon as the settings are read.
+- **LED test routes**: `/api/test/led_*_pwm` and `/api/test/led_*` write a
+  temporary test layer – shown for 10 s (500 ms for the blink routes) above
+  the content colour and below the overlays, then the derived colour is
+  back; nothing is stored, `led_source` reads `test` meanwhile.
+- **Web UI**: the LED settings move from the Content editor to one **LED**
+  block in the device sheet – the mode (*Off* · *Colour from content* ·
+  *Red / green by change*), *Brightness* and the LED while asleep (*Off
+  while asleep* · *Keep the colour while asleep*) – each saved at once when
+  changed. The *Test LED & sound* disclosure becomes *Test* under that
+  block: a colour and *Test* (10 s, then back), volume and *Beep*; the
+  *Off* button is gone, the mode is the switch. The *Reactions* of a
+  *Text* say when the LED colour is shown
+  ([`docs/WEB_UI.md`](docs/WEB_UI.md) → *Device sheet contents*).
+
+### Deprecated
+
+- **API**: the configuration keys `led_rule` (`off` · `sign`) and
+  `led_battery` (`off` · `hold`). `POST /config` still accepts them as
+  aliases of `led_mode` (`off` → `off`, `sign` → `sign`) and `led_sleep`
+  (`off` → `off`, `hold` → `keep`) – the canonical key wins when both are
+  posted; `GET /api/config` still reports them next to the new keys
+  (`led_rule` says `off` for the mode `payload`).
+
+### Fixed
+
+- **LED**: the LED could stay lit – red on a device whose last ticker was
+  down – although the driver believed it dark: the PWM channel could take
+  a stale duty when the pins were attached at boot, and the driver,
+  trusting its cache, never wrote it again. The duty is now written again
+  right after the pins are attached and once a minute while awake.
+- **LED**: a brightness or *Off* chosen in the device sheet lasted only
+  until the next payload or ticker fetch – it was written as the LED's
+  colour, which the content replaces every refresh, and nothing was stored
+  on the device. The brightness is now the setting above; a test colour is
+  a temporary layer that ends by itself.
+- **LED**: switching the content colour off (`led_rule = off`, now
+  `led_mode = off`) left the last red / green lit until a payload happened
+  to carry an `alert.led`; the colour is now derived again at once.
+- **LED**: on battery the BATTERY LOW rule (LED off at 15 % or less) is
+  applied to the wake-up as well, not only while awake on USB.
+
 ## [0.5.0] - 2026-10-12
 
 ### Added

@@ -15,11 +15,11 @@
 enum CommandType : uint8_t {
     CMD_NONE = 0,
     CMD_PAYLOAD,        // str = JSON screen payload (already validated by the producer)
-    CMD_LED_RGB,        // a,b,c = r,g,b
-    CMD_LED_SET_R,      // a = value
+    CMD_LED_RGB,        // a,b,c = r,g,b - the test layer (10 s)
+    CMD_LED_SET_R,      // a = value - one channel of the test layer (10 s)
     CMD_LED_SET_G,
     CMD_LED_SET_B,
-    CMD_LED_BLINK,      // a,b,c = r,g,b (0/1); on for 500 ms then off
+    CMD_LED_BLINK,      // a,b,c = r,g,b (0/1); the test layer for 500 ms
     CMD_VOLUME,         // a = volume
     CMD_PLAY_RTTTL,     // str = melody
     CMD_BEEP,           // a = preset: PayloadSound

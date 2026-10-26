@@ -43,14 +43,14 @@ The smallest valid document is `{"value": "hello"}`.
 | `title` | string or number | ≤ 63 bytes | Heading line, top left. Together with `value` it redraws the screen (text look) |
 | `value` | string or number | ≤ 127 bytes | Main text, centred, as large as it fits, truncated with `...` on the panel |
 | `change` | string or number | ≤ 15 bytes | Printed as given, e.g. `"+0.07%"`. A non-empty `change` **switches to the ticker look** (triangle, change on the top row, `value` drawn as the price). `""` is accepted and draws nothing |
-| `dir` | `-1` · `0` · `1`, or `"down"` · `"flat"` · `"up"` | integer or one of the three words | Triangle direction and the LED rule. Absent: derived from the sign of `change`. A float or any other word is rejected |
+| `dir` | `-1` · `0` · `1`, or `"down"` · `"flat"` · `"up"` | integer or one of the three words | Triangle direction and the LED colour under the device's LED mode `sign`. Absent: derived from the sign of `change`. A float or any other word is rejected |
 | `age_s` | number ≥ 0 | – | Age of the quote when you sent it, in seconds; the device adds the time since and draws *just now* / `N min ago`. Strings and negatives are rejected |
 | `time` | string or number | ≤ 15 bytes | Drawn verbatim in place of the relative age (`"19:00"`) |
 | `spark` | array of numbers | first 48 numbers kept | Sparkline, min–max scaled; non-numbers are skipped, fewer than 2 points draw nothing. A non-empty array **switches to the ticker look** |
 | `short` | string or number | ≤ 7 printable ASCII | Name on the black badge of a ticker frame (`"BTC"`). Does not switch the look by itself |
 | `alert` | object | – | Container for the three fields below; any other type is rejected |
-| `alert.led` | string | exactly 6 hex digits, optional leading `#` | LED colour `RRGGBB` (`"00FF00"`, `"#ff0000"`; `"000000"` = off and forgets the colour). Kept until the next payload changes it. Numbers and colour names are rejected |
-| `alert.brightness` | integer | 0–255 | Scales the LED colour per channel (`c × brightness / 255`) – an explicit `alert.led` as well as the automatic red/green by sign. Default 255. `0` keeps the colour dark but remembered (a later non-zero value restores it). A float or an out-of-range value is rejected |
+| `alert.led` | string | exactly 6 hex digits, optional leading `#` | LED colour `RRGGBB` (`"00FF00"`, `"#ff0000"`; `"000000"` = off). Shown while this payload is the current screen, when the device's LED mode is `payload` or `sign` (ignored under the default `off`). Numbers and colour names are rejected |
+| `alert.brightness` | integer | 0–255 | Scales the content colour per channel (`c × brightness / 255`) – an explicit `alert.led` as well as the automatic red/green by sign. Default 255, kept until changed. `0` drives the content colour dark (a later non-zero value restores it). A float or an out-of-range value is rejected |
 | `alert.sound` | string | preset or RTTTL ≤ 1023 bytes | `beep` · `double_beep` · `long_beep` · `none` · `""`, or an RTTTL melody. An unknown string is *ignored with a warning* – the rest of the payload is still applied |
 | `alert.volume` | integer | 0–255 | Amplitude for this and later sounds. A float or an out-of-range value is rejected |
 | `tiles` | array of ≤ 4 | object · `null` · `{}` per cell | Several coins in one frame – see [Several coins at once: tile layouts](#several-coins-at-once-tile-layouts). A tile = `title` (≤ 15 printable ASCII), `value` (≤ 23 bytes), `change` (≤ 15 bytes), `dir`, optional `style` |
@@ -67,17 +67,20 @@ Notes on types:
 * `alert.volume` and `alert.brightness` are **sticky**: they stay in effect
   for later payloads until changed, and go back to 255 on a boot – every
   battery wake-up is a boot, so send them in every payload there. Brightness
-  dims the colour the payload sets, not the overlays (update, pairing,
-  identify, offline pulse) or the wake-up blinks; in deep sleep with *LED on
-  battery* = `hold` the held colour is full-on per channel regardless of
-  brightness, and `0` holds nothing. Thinking in per cent? Send
-  `round(pct * 255 / 100)` – 50 % is `128`.
+  dims the content colour only, not the overlays (update, pairing,
+  identify, offline pulse) or the wake-up blinks; the device's own
+  *Brightness* setting (`led_brightness`) dims everything on top of it. In
+  deep sleep with *While asleep* = `keep` the held colour is full-on per
+  channel regardless of either brightness, and `0` on either holds nothing.
+  Thinking in per cent? Send `round(pct * 255 / 100)` – 50 % is `128`.
 * Only `change` and `spark` select the ticker layout. A payload with just
   `title` / `value` keeps the text look; `short` and `dir` alone do not
   change the look. `tiles` selects a tile layout and wins over both.
-* An explicit `alert.led` always wins. Without one, the device's own *LED
-  rule* setting (`sign`) colours the LED red/green by `dir`; with the
-  default `off` the LED is left as it was.
+* The LED follows the device's own LED mode (`led_mode`, device sheet →
+  *LED*; [`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*): `payload` shows
+  the payload's `alert.led` (none = dark), `sign` colours it red/green by
+  `dir` unless the payload carries an `alert.led`, and the default `off`
+  ignores both – the content never lights the LED.
 
 ### What is rejected, and the exact reason
 
@@ -400,7 +403,7 @@ shows what to send and what you will see.
   them and gives that cell its full height.
 * The root **`title`** is only what the web UI's *Showing* line says
   (without it: the tile titles joined); **`age_s`** feeds the age line;
-  **`alert`** works as always – the LED rule `sign` follows the **first**
+  **`alert`** works as always – under the LED mode `sign` the LED follows the **first**
   tile. The root `value`, `change`, `dir`, `time`, `spark` and `short` are
   **ignored** next to `tiles` (the answer carries
   `"warning": "value ignored: tiles present"`); the frame is still drawn.
@@ -807,8 +810,8 @@ Checking the result:
 | Works on USB, nothing on battery | On battery the device fetches **once per wake-up** and must get an answer within 10 s | Keep the server answering from cache; check the interval; a battery device cannot be configured while asleep – switch it off and on to get its 3-minute settings window |
 | The text is drawn with gaps or boxes | Non-ASCII characters (Cyrillic, `·`, `€`, emoji) | ASCII only; `|`, `-`, `+`, `%` and digits are safe |
 | Numbers look rounded (`95240.6`) | A float sent as a JSON number is rendered with 6 significant digits | Format on the server and send a string |
-| Price shows but no triangle / LED colour | `change` missing, or the device's *LED rule* is `off` while you expected red/green by sign | Send `change` (and `dir`), or set `alert.led`; or set the LED rule to `sign` |
-| LED dark or dim although `alert.led` is set | A sticky `alert.brightness` of `0` (or a low value) from an earlier payload; `GET /api/status` → `led` shows the scaled colour | Send `"brightness": 255` (it is kept until changed and reset on boot) |
+| Price shows but no triangle / LED colour | `change` missing, or the device's LED mode is `off` (the default: the content never lights the LED) | Send `change` (and `dir`) and set the LED mode to `sign`; or set `alert.led` with the mode `payload` |
+| LED dark or dim although `alert.led` is set | The device's LED mode is `off`, or its `led_brightness` is `0`, or a sticky `alert.brightness` of `0` (or a low value) from an earlier payload; `GET /api/status` → `led_source` / `led_brightness` / `led` say which | Set the LED mode to `payload` (device sheet → *LED*), raise the brightness, or send `"brightness": 255` (kept until changed, reset on boot) |
 | Tiles come out as one text / ticker frame, or the answer says `layout: 2x2 needs tiles` | `tiles` missing or not an array (`"tiles": {...}`), or only `layout` was sent | `"tiles": [ {...}, {...} ]` – an array of objects / `null`; `layout` alone selects nothing |
 | The bottom-right cell is smaller than the others / its price is cut | The status band takes its lowest 16 rows; a long `change` eats the value on a 9 pt row | Round `change` (`+15%`), put the least important item there, or `"status": false` |
 | A `POST /api/screen` works but the Pull URL does not | The URL answers something else than what you tested – a redirect to a login page, a different route, a cached old body | `curl -v` the exact URL the device uses; check `Cache-Control: no-store` |

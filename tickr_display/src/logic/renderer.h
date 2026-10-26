@@ -12,12 +12,14 @@ bool renderer_process_payload(const String& json_payload);
 // Apply an already validated payload to the hardware (blocking).
 void renderer_apply(const ScreenPayload& p);
 
-// LED rule (docs/TICKERS.md "What the screen shows", AppConfig::led_rule): LED_RULE_OFF = the
-// payload's alert.led as today; LED_RULE_SIGN = red / green by the payload's
-// direction when it carries no alert.led. Sets the LED *base* colour, so
-// the overlays of hal_indication still win and the base returns after them.
-void    renderer_set_led_rule(uint8_t rule);
-uint8_t renderer_led_rule();
+// The LED (docs/DEVICE_UI.md "LED and sound", logic/led_model.h): the base
+// colour is derived from `led_mode` and the last render. renderer_apply()
+// and fetch_grid() record the render; led_recompute() derives the colour
+// and writes it as the base of hal_indication (the overlays still win).
+// Main task only (the LED driver's). Called after every render, after
+// every change of led_mode / led_brightness / led_sleep, and at boot.
+void renderer_set_led_mode(uint8_t mode);
+void led_recompute();
 
 // Play a preset / RTTTL (blocking). `rtttl` is only used for SOUND_RTTTL.
 void renderer_play_sound(PayloadSound sound, const char* rtttl);

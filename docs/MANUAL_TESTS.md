@@ -72,8 +72,13 @@ Any browser with the API token entered, two USB-powered members.
 
 1. *Rename* – the name changes on the card and in the other device's shelf.
 2. *Identify this* – the device draws its number; *Stop identify* clears it.
-3. *Test LED & sound* – colour, *Off*, *Beep* act on the device; the next
-   payload restores the payload's LED and sound.
+3. *LED* – each change of the mode / *Brightness* / the while-asleep
+   setting saves at once (`GET /api/config` follows) and the bar changes
+   without a new payload: *Off* goes dark at once, *Red / green by change*
+   colours the bar from the ticker already on the panel, a lower
+   *Brightness* stays after the next fetch and after a restart; *Test* –
+   the colour shows for 10 s (`GET /api/status` → `led_source` = `test`),
+   then the derived colour is back; *Beep* acts on the device.
 4. *Clear pending* on a sleeping member with parked content – the *pending*
    badge disappears and the relay's `/api/relay` no longer lists it.
 5. *Forget* on an offline card – it leaves the shelf and returns with its

@@ -200,7 +200,8 @@ runs on the device. One directory per module:
 * `test_refresh_policy` – the e-ink refresh decision (none / defer / partial / full), forced-full
   counters, 30 s spacing, identical-frame skip ([`DEVICE_UI.md`](DEVICE_UI.md) → *E-ink refresh rules*).
 * `test_screen_bmp` – the 1-bit BMP view of the shadow framebuffer.
-* `test_ticker` – ticker helpers: age line, sparkline scaling, LED rule, direction from the change string.
+* `test_ticker` – ticker helpers: age line, sparkline scaling, direction from the change string.
+* `test_led_model` – the derived LED model: mode × `alert.led` × direction, the held colour at boot, the setting words and the `led_rule` / `led_battery` aliases, the sleep hold, the brightness scale.
 * `test_spark_hist` – the on-device sparkline ring (re-quantisation, key change, RTC garbage).
 * `test_source` – ticker source: mini-JSONPath extraction from the presets' response shapes
   (`fixtures.h`), preset resolution, number formatting, config schema migration, malformed bodies.

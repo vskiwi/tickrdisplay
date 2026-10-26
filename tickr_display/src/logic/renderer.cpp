@@ -1,6 +1,7 @@
 #include "renderer.h"
 #include "../hal/hal_display.h"
 #include "../hal/hal_indication.h"
+#include "led_model.h"
 
 void renderer_init() {
     // nothing special yet
@@ -31,14 +32,14 @@ void renderer_play_sound(PayloadSound sound, const char* rtttl) {
     }
 }
 
-static uint8_t s_led_rule = LED_RULE_OFF;
-
-void renderer_set_led_rule(uint8_t rule) {
-    s_led_rule = rule;
+void renderer_set_led_mode(uint8_t mode) {
+    led_model_set_mode(mode);
 }
 
-uint8_t renderer_led_rule() {
-    return s_led_rule;
+void led_recompute() {
+    uint8_t r, g, b;
+    uint8_t src = led_model_derive(&r, &g, &b);
+    indication_led_rgb(r, g, b, led_source_str(src));
 }
 
 void renderer_apply(const ScreenPayload& p) {
@@ -50,14 +51,12 @@ void renderer_apply(const ScreenPayload& p) {
     if (p.has_brightness) {
         indication_set_brightness(p.brightness);
     }
-    uint8_t r, g, b;
-    // The LED rule follows the first tile of a tile frame (docs/API.md "Tile layouts").
+    // The LED follows the first tile of a tile frame (docs/API.md "Tile layouts").
     const bool tiles = payload_is_tiles(p);
     const bool has_dir = tiles ? (p.tiles[0].has && p.tiles[0].has_dir) : p.has_dir;
     const TickerDir dir = tiles ? p.tiles[0].dir : p.dir;
-    if (ticker_led_decide(s_led_rule, p.has_led, p.r, p.g, p.b, has_dir, dir, &r, &g, &b)) {
-        indication_led_rgb(r, g, b);
-    }
+    led_model_render(p.has_led, p.r, p.g, p.b, has_dir, dir);
+    led_recompute();
     renderer_play_sound(p.sound, p.rtttl);
 
     if (tiles) {

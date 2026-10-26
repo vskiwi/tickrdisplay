@@ -154,11 +154,14 @@ sparkline bottom-left, the age line bottom-right, badges in the corner
 * **Change**: `+0.07%` / `-1.23%` / `0.00%` (no sign when it rounds to
   zero) with a filled triangle up or down, a dash for flat. Without a change
   path the top row shows the label only.
-* **LED**: with the device setting *LED rule* = `sign`, green on an up-move,
-  red on a down-move, **unchanged** on flat; `off` (default) leaves the LED
-  to the payload's `alert.led`. A fetch failure never touches the LED – red
-  means "down", not "broken". On battery the colour is held through the
-  deep sleep only with *LED on battery* = `hold` ([`DEVICE_UI.md`](DEVICE_UI.md)
+* **LED**: with the device's LED mode (`led_mode`, device sheet → *LED*) =
+  `sign`, green on an up-move, red on a down-move, **dark** on flat or
+  without a change; `payload` shows a payload's `alert.led` only (a ticker
+  has none, so the LED stays dark); `off` (default) never lights the LED
+  from the content. The colour is derived again at every fetch and at every
+  change of the mode. A fetch failure never touches the LED – red means
+  "down", not "broken". On battery the colour is held through the deep
+  sleep only with *While asleep* = `keep` ([`DEVICE_UI.md`](DEVICE_UI.md)
   → *LED and sound*).
 * **Age line**: *just now* under a minute, then `5 min ago` / `2 h ago` /
   `3 d ago`, counted from the fetch. Past **T_stale** = 3 × the refresh
@@ -176,7 +179,7 @@ the grid view is the single look of §4.
 
 <p align="center">
   <img src="images/screen-grid.png" width="440" alt="E-ink frame as a 2x2 grid: BTC and ETH from Binance, XBT from Kraken and SOL from CoinGecko, each cell with a name badge, the change with its triangle and the price; the age line and the USB bolt share the bottom-right cell">
-  <img src="images/content-editor-grid.png" width="300" alt="The Content editor in the grid view: four ticker rows with preset, symbol, market and short name, up, down, remove and Test buttons per row, the interval field and the Advanced section for the selected row">
+  <img src="images/content-editor-grid.png" width="300" alt="The Content editor in the grid view: four ticker rows from Binance, Kraken and CoinGecko with preset, symbol, market and short name, up, down, remove and Test buttons per row, the interval field and the collapsed Advanced section for the selected row">
 </p>
 
 * **A cell**: the short name on a black badge (12 pt, 9 pt when it would
@@ -201,14 +204,15 @@ the grid view is the single look of §4.
   checksum). The cycle counts as successful when at least one source
   answered; `last_error` names the row (`pull: #2 http 451`). A source
   that never answered shows its badge and `?` with an empty price. The
-  LED rule (§4) follows the first ticker.
+  LED (mode `sign`) follows the first ticker – its last known direction
+  while its fetch fails.
 * **Battery**: the grid makes up to four TLS fetches per wake, so the
   firmware raises the on-battery interval to **at least 15 minutes** (the
   editor says so and sets the field's minimum); on USB the interval is as
   configured, with the floor of 1 min.
 * **Mixed presets** are fine – a Binance pair next to a Kraken pair and a
   CoinGecko id. Every row has its own *Advanced* settings (label, short
-  name, decimals, separator, custom URL and paths); the LED rule and the
+  name, decimals, separator, custom URL and paths); the LED mode and the
   interval are per device.
 * **API**: `tk_view` (`single` · `grid`), `tk_n` (1–4) and the rows as
   `tk1_*` … `tk3_*` next to the `tk_*` of the first – [`API.md`](API.md)
@@ -251,8 +255,8 @@ when every source failed.
 
 **Battery power.** One fetch cycle per wake-up, then deep sleep for the
 refresh interval (at least 15 min with a grid); the LED blinks red after a
-miss and green after a success – unless the `sign` rule coloured it, then
-the colour stays. A miss
+miss and green after a success – unless the LED mode `sign` coloured it,
+then the colour stays. A miss
 doubles the sleep (2×, 4× …, capped at 60 min, never below the interval);
 the first miss draws nothing, the second and every fourth after it draw the
 OFFLINE card with the age of the shown quote ([`DEVICE_UI.md`](DEVICE_UI.md)
@@ -268,7 +272,7 @@ it off and on with the cable in brings it up as a USB device at once – or
 **3 minutes** with *On battery* and its `http://<ip>/` on the panel, long
 enough to change the ticker or the interval, and goes back to sleeping
 afterwards ([`DEVICE_UI.md`](DEVICE_UI.md) → *Power-mode switch*). Between
-wake-ups the LED is dark unless *LED on battery* is set to `hold`
+wake-ups the LED is dark unless *While asleep* is set to `keep`
 ([`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*). An interval of a few
 minutes on battery is expensive: every wake-up costs the same ten seconds
 of Wi-Fi and TLS, so by estimate 1 min empties a cell in about two days
@@ -336,7 +340,8 @@ Shelf page (`/`) → click the device → **Content…** → *Source* = **Ticker
    itself (CORS), the device can.
 6. **Advanced** – label, **short name** for the badge (≤ 7 chars; the
    placeholder shows the derived name after a *Test*), decimals, thousands
-   separator, **LED rule**.
+   separator. The LED is set in the device sheet, not here
+   ([`WEB_UI.md`](WEB_UI.md) → *Device sheet contents*).
 7. **Save** – the device fetches at once and the tile preview follows.
 
 **Text → Send** or **Custom JSON URL → Save** on a ticker device afterwards
@@ -386,8 +391,8 @@ Notes: the `http response` node only fires for messages that came through
 `http in` (the inject path has no `msg.res`; a `switch` on `msg.res`
 silences Node-RED's warning). The MQTT message is retained, so a device that
 (re)connects gets the last quote at once. A `spark` array of ≤ 48 numbers
-adds the chart; keep the device's LED rule `off` when the proxy sets
-`alert.led`.
+adds the chart; set the device's LED mode to `payload` when the proxy sets
+`alert.led` (under `off` the colour is ignored).
 
 ## Appendix B – Home Assistant
 

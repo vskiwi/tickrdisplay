@@ -1,6 +1,6 @@
 #include "config_manager.h"
 #include "../logic/battery.h"   // cell divider default + validity
-#include "../logic/ticker.h"    // led_rule "off" | "sign"
+#include "../logic/led_model.h"   // led_mode / led_sleep words and their aliases
 
 static const char* CONFIG_FILE     = "/config.json";
 static const char* CONFIG_FILE_TMP = "/config.json.tmp";
@@ -127,10 +127,13 @@ bool config_load(AppConfig& config) {
     // schema 6 (absent = auto; schema 10 reads the old explicit default as auto)
     int cn = doc["adc_cell_num"].as<int>();   // absent -> 0 = CELL_DIVIDER_AUTO
     int cd = doc["adc_cell_den"].as<int>();
-    // schema 7
-    config.led_rule = led_rule_parse(doc["led_rule"] | "off");
-    // schema 10
-    config.led_battery = led_battery_parse(doc["led_battery"] | "off");
+    // schema 12: led_mode / led_sleep; older files carry led_rule (off | sign,
+    // the same words) / led_battery (off | hold, "hold" parses as keep).
+    config.led_mode  = led_mode_parse(doc["led_mode"] | (doc["led_rule"] | "off"));
+    config.led_sleep = led_sleep_parse(doc["led_sleep"] | (doc["led_battery"] | "off"));
+    // schema 11 (absent = full brightness; out of range = default)
+    int lb = doc["led_brightness"] | (int)LED_BRIGHTNESS_DEFAULT;
+    config.led_brightness = (uint8_t)((lb < 0 || lb > 255) ? LED_BRIGHTNESS_DEFAULT : lb);
     // schema 8: the content source. Older files: pull_url set -> url, else none.
     if (doc.containsKey("source_kind")) config.source_kind = source_kind_parse(doc["source_kind"] | "none");
     else config.source_kind = source_pull_kind(SRC_KIND_NONE, config.pull_url[0] != '\0');
@@ -193,8 +196,9 @@ bool config_save(const AppConfig& config) {
     doc["power_source"] = config_power_source_str(config.power_source);
     doc["adc_cell_num"] = config.adc_cell_num;
     doc["adc_cell_den"] = config.adc_cell_den;
-    doc["led_rule"] = led_rule_str(config.led_rule);
-    doc["led_battery"] = led_battery_str(config.led_battery);
+    doc["led_mode"] = led_mode_str(config.led_mode);
+    doc["led_sleep"] = led_sleep_str(config.led_sleep);
+    doc["led_brightness"] = config.led_brightness;
     doc["source_kind"] = source_kind_str(config.source_kind);
     spec_save(doc.as<JsonObject>(), config.ticker);
     doc["tk_api_key"] = config.tk_api_key;

@@ -1,6 +1,6 @@
 // Unity tests for the pure ticker helpers (src/logic/ticker.cpp) -
-// docs/TICKERS.md "What the screen shows": age line, sparkline scaling, LED rule,
-// direction from the change string.
+// docs/TICKERS.md "What the screen shows": age line, sparkline scaling,
+// direction from the change string (the LED: test_led_model).
 #include <unity.h>
 #include <string.h>
 #include <stdio.h>
@@ -309,89 +309,8 @@ void test_grid_fit_price_steps(void) {
     TEST_ASSERT_EQUAL_STRING("$95,240.50", out);
 }
 
-// --- LED rule ------------------------------------------------------------------
-
-void test_led_rule_off_uses_payload_led_only(void) {
-    uint8_t r = 7, g = 7, b = 7;
-    TEST_ASSERT_FALSE(ticker_led_decide(LED_RULE_OFF, false, 0, 0, 0, true, 1, &r, &g, &b));
-    TEST_ASSERT_FALSE(ticker_led_decide(LED_RULE_OFF, false, 0, 0, 0, true, -1, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(7, r);   // untouched
-    TEST_ASSERT_TRUE(ticker_led_decide(LED_RULE_OFF, true, 0x12, 0x34, 0x56, true, -1, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(0x12, r); TEST_ASSERT_EQUAL_UINT8(0x34, g); TEST_ASSERT_EQUAL_UINT8(0x56, b);
-}
-
-void test_led_rule_sign_table(void) {
-    uint8_t r, g, b;
-    TEST_ASSERT_TRUE(ticker_led_decide(LED_RULE_SIGN, false, 0, 0, 0, true, 1, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(0, r); TEST_ASSERT_EQUAL_UINT8(255, g); TEST_ASSERT_EQUAL_UINT8(0, b);   // up = green
-    TEST_ASSERT_TRUE(ticker_led_decide(LED_RULE_SIGN, false, 0, 0, 0, true, -1, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(255, r); TEST_ASSERT_EQUAL_UINT8(0, g); TEST_ASSERT_EQUAL_UINT8(0, b);   // down = red
-    r = g = b = 9;
-    TEST_ASSERT_FALSE(ticker_led_decide(LED_RULE_SIGN, false, 0, 0, 0, true, 0, &r, &g, &b));      // flat = unchanged
-    TEST_ASSERT_FALSE(ticker_led_decide(LED_RULE_SIGN, false, 0, 0, 0, false, 1, &r, &g, &b));     // no direction = unchanged
-    TEST_ASSERT_EQUAL_UINT8(9, r);
-    // an explicit alert.led wins over the rule for that frame
-    TEST_ASSERT_TRUE(ticker_led_decide(LED_RULE_SIGN, true, 0, 0, 255, true, -1, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(0, r); TEST_ASSERT_EQUAL_UINT8(0, g); TEST_ASSERT_EQUAL_UINT8(255, b);
-}
-
-void test_led_rule_strings(void) {
-    TEST_ASSERT_EQUAL_STRING("off", led_rule_str(LED_RULE_OFF));
-    TEST_ASSERT_EQUAL_STRING("sign", led_rule_str(LED_RULE_SIGN));
-    TEST_ASSERT_EQUAL_STRING("off", led_rule_str(200));
-    TEST_ASSERT_EQUAL_UINT8(LED_RULE_SIGN, led_rule_parse("sign"));
-    TEST_ASSERT_EQUAL_UINT8(LED_RULE_OFF, led_rule_parse("off"));
-    TEST_ASSERT_EQUAL_UINT8(LED_RULE_OFF, led_rule_parse("alert"));
-    TEST_ASSERT_EQUAL_UINT8(LED_RULE_OFF, led_rule_parse(NULL));
-}
-
-// --- LED through deep sleep ------------------------------------------------------
-
-void test_led_battery_hold_rule(void) {
-    uint8_t r, g, b;
-    // off (the default): dark whatever the level and the colour
-    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_OFF, true, 100, 255, 0, 0, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(0, r | g | b);
-    // hold: the base colour, thresholded per channel, from 30 % up
-    TEST_ASSERT_TRUE(led_battery_hold(LED_BATTERY_HOLD, true, 100, 255, 0, 0, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(255, r); TEST_ASSERT_EQUAL_UINT8(0, g); TEST_ASSERT_EQUAL_UINT8(0, b);
-    TEST_ASSERT_TRUE(led_battery_hold(LED_BATTERY_HOLD, true, LED_BATTERY_MIN_PCT, 0, 200, 0, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(0, r); TEST_ASSERT_EQUAL_UINT8(255, g); TEST_ASSERT_EQUAL_UINT8(0, b);
-    TEST_ASSERT_TRUE(led_battery_hold(LED_BATTERY_HOLD, true, 50, 0x80, 0x7F, 0xFF, &r, &g, &b));   // >= 128 = on
-    TEST_ASSERT_EQUAL_UINT8(255, r); TEST_ASSERT_EQUAL_UINT8(0, g); TEST_ASSERT_EQUAL_UINT8(255, b);
-    // below the floor, an unknown level, or nothing to hold: dark
-    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, true, LED_BATTERY_MIN_PCT - 1, 255, 0, 0, &r, &g, &b));
-    TEST_ASSERT_EQUAL_UINT8(0, r | g | b);
-    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, false, 100, 255, 0, 0, &r, &g, &b));
-    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, true, 100, 0, 0, 0, &r, &g, &b));
-    TEST_ASSERT_FALSE(led_battery_hold(LED_BATTERY_HOLD, true, 100, 10, 100, 127, &r, &g, &b));    // too dim on every channel
-    TEST_ASSERT_EQUAL_UINT8(0, r | g | b);
-}
-
-void test_led_battery_strings(void) {
-    TEST_ASSERT_EQUAL_STRING("off", led_battery_str(LED_BATTERY_OFF));
-    TEST_ASSERT_EQUAL_STRING("hold", led_battery_str(LED_BATTERY_HOLD));
-    TEST_ASSERT_EQUAL_STRING("off", led_battery_str(77));
-    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_HOLD, led_battery_parse("hold"));
-    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_OFF, led_battery_parse("off"));
-    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_OFF, led_battery_parse("always"));
-    TEST_ASSERT_EQUAL_UINT8(LED_BATTERY_OFF, led_battery_parse(NULL));
-}
-
-// The end-of-wake success blink: green unless the sign rule coloured the LED.
-void test_led_success_blink(void) {
-    TEST_ASSERT_TRUE(led_success_blink(LED_RULE_OFF, 0, 0, 0));
-    TEST_ASSERT_TRUE(led_success_blink(LED_RULE_OFF, 255, 0, 0));      // a payload colour: blink as before
-    TEST_ASSERT_TRUE(led_success_blink(LED_RULE_SIGN, 0, 0, 0));       // sign, but no direction yet
-    TEST_ASSERT_FALSE(led_success_blink(LED_RULE_SIGN, 255, 0, 0));    // red = down: the colour is the news
-    TEST_ASSERT_FALSE(led_success_blink(LED_RULE_SIGN, 0, 255, 0));
-}
-
 int main(int, char**) {
     UNITY_BEGIN();
-    RUN_TEST(test_led_battery_hold_rule);
-    RUN_TEST(test_led_battery_strings);
-    RUN_TEST(test_led_success_blink);
     RUN_TEST(test_dir_from_sign_prefix);
     RUN_TEST(test_dir_from_number_and_garbage);
     RUN_TEST(test_age_line_table);
@@ -411,8 +330,5 @@ int main(int, char**) {
     RUN_TEST(test_grid_set_key_set_and_order);
     RUN_TEST(test_grid_battery_floor);
     RUN_TEST(test_grid_fit_price_steps);
-    RUN_TEST(test_led_rule_off_uses_payload_led_only);
-    RUN_TEST(test_led_rule_sign_table);
-    RUN_TEST(test_led_rule_strings);
     return UNITY_END();
 }

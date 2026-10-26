@@ -28,7 +28,8 @@
 #include "../logic/command_queue.h"
 #include "../logic/payload.h"
 #include "../logic/rtttl.h"
-#include "../logic/renderer.h"   // renderer_set_led_rule, renderer_apply
+#include "../logic/renderer.h"   // renderer_set_led_mode, led_recompute, renderer_apply
+#include "../logic/led_model.h"  // led_mode / led_sleep words, led_model_render
 #include "../logic/source.h"     // ticker source: presets, extraction
 #include "../logic/spark_hist.h" // on-device sparkline history
 #include "../generated/ca_bundle.h"   // TLS roots of the ticker sources (scripts/build_ca_bundle.py)
@@ -217,7 +218,12 @@ bool ConnectivityManager::init(DataCallback onData, bool low_power) {
         Serial.println("Config: defaults in use");
     }
     web_auth_set_token(_config.api_token);
-    renderer_set_led_rule(_config.led_rule);
+    // The LED settings (docs/DEVICE_UI.md "LED and sound"): the mode and the
+    // persistent dimmer, then the colour derived again (main task: init()
+    // runs from setup()). main.cpp applied the same from its early read.
+    renderer_set_led_mode(_config.led_mode);
+    indication_set_device_brightness(_config.led_brightness);
+    led_recompute();
 
     // Hostname "<device-name>-XXXXXX", event counters (managers/wifi_link.h):
     // before WiFi.mode() - the core applies the hostname when the STA starts.
@@ -351,8 +357,14 @@ void ConnectivityManager::handle_config_api(AsyncWebServerRequest* request) {
     doc["arduino_ota_build"] = ota_arduino_built();   // UI hides the OTA password field otherwise
     doc["adc_cell_num"]     = _config.adc_cell_num;   // cell divider, 0/0 = auto (docs/HARDWARE.md "Power sensing")
     doc["adc_cell_den"]     = _config.adc_cell_den;
-    doc["led_rule"]         = led_rule_str(_config.led_rule);   // "off" | "sign" (docs/TICKERS.md "What the screen shows")
-    doc["led_battery"]      = led_battery_str(_config.led_battery);   // "off" | "hold" (docs/DEVICE_UI.md "LED and sound")
+    // The LED (docs/DEVICE_UI.md "LED and sound"): led_mode "off" | "payload" | "sign",
+    // led_sleep "off" | "keep", led_brightness 0..255 - and the former keys
+    // led_rule / led_battery as readers of the previous API expect them.
+    doc["led_mode"]         = led_mode_str(_config.led_mode);
+    doc["led_sleep"]        = led_sleep_str(_config.led_sleep);
+    doc["led_brightness"]   = _config.led_brightness;
+    doc["led_rule"]         = _config.led_mode == LED_MODE_SIGN ? "sign" : "off";
+    doc["led_battery"]      = _config.led_sleep == LED_SLEEP_KEEP ? "hold" : "off";
     // Content source (schema 8, docs/TICKERS.md "Presets"): the editor pre-fills its Ticker form from these.
     // The grid (schema 9): tk_view, tk_n and rows 1..3 as tk1_* ... tk3_* (flat, like the POST fields).
     doc["source_kind"]      = source_kind_str(_config.source_kind);
@@ -510,13 +522,29 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
             nc.adc_cell_den = (uint16_t)cd;
         }
     }
+    // The LED (docs/DEVICE_UI.md "LED and sound"): led_mode / led_sleep, with
+    // the former led_rule / led_battery accepted as aliases (the canonical
+    // key wins when both are posted).
     if (getp("led_rule", v)) {
-        if (v == "off" || v == "sign") nc.led_rule = led_rule_parse(v.c_str());
+        if (v == "off" || v == "sign") nc.led_mode = led_mode_parse(v.c_str());
         else err += "led_rule: must be off or sign. ";
     }
     if (getp("led_battery", v)) {
-        if (v == "off" || v == "hold") nc.led_battery = led_battery_parse(v.c_str());
+        if (v == "off" || v == "hold") nc.led_sleep = led_sleep_parse(v.c_str());
         else err += "led_battery: must be off or hold. ";
+    }
+    if (getp("led_mode", v)) {
+        if (led_mode_valid(v.c_str())) nc.led_mode = led_mode_parse(v.c_str());
+        else err += "led_mode: must be off, payload or sign. ";
+    }
+    if (getp("led_sleep", v)) {
+        if (led_sleep_valid(v.c_str())) nc.led_sleep = led_sleep_parse(v.c_str());
+        else err += "led_sleep: must be off or keep. ";
+    }
+    if (getp("led_brightness", v)) {
+        long lb = v.toInt();
+        if (lb < 0 || lb > 255 || !isdigit((unsigned char)v[0])) err += "led_brightness: must be 0..255. ";
+        else nc.led_brightness = (uint8_t)lb;
     }
 
     // Content source (schema 8, docs/TICKERS.md "Presets"). The editor posts only the
@@ -618,7 +646,10 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
     _config = nc;
     web_auth_set_token(_config.api_token);
     power_set_cell_divider(_config.adc_cell_num, _config.adc_cell_den);
-    renderer_set_led_rule(_config.led_rule);
+    // The LED (docs/DEVICE_UI.md "LED and sound"): mode + dimmer are applied
+    // and the colour derived again from loop() - the LED driver belongs to
+    // the main task.
+    _led_reconfigure = true;
     _mqtt_reconfigure = true;   // applied from loop(); MQTT socket must not be touched here
 
     request->send(200, HTML_CT, "Configuration Saved. <a href='/system'>Back</a>");
@@ -629,7 +660,7 @@ void ConnectivityManager::handle_config_post(AsyncWebServerRequest* request) {
 // GET /api/status - public: no secrets, and its auth_enabled flag is
 // what tells a page without a token that it is read-only.
 void ConnectivityManager::handle_status(AsyncWebServerRequest* request) {
-    StaticJsonDocument<1024> doc;
+    StaticJsonDocument<1280> doc;   // ~45 members (16 B each) + the copied strings (ip, cell_divider, last_error)
     doc["uptime_s"] = (uint32_t)(millis() / 1000);
     doc["heap_free"] = ESP.getFreeHeap();
     doc["heap_min_free"] = ESP.getMinFreeHeap();
@@ -695,6 +726,22 @@ void ConnectivityManager::handle_status(AsyncWebServerRequest* request) {
     led["r"] = lr;
     led["g"] = lg;
     led["b"] = lb;
+    // ... and how it came about: the base colour before overlays and the
+    // dimmer, the active overlays (bit 1 << LedOverlay), the device dimmer,
+    // and the colour the pads carried at boot (held through a deep sleep).
+    indication_get_rgb(&lr, &lg, &lb);
+    JsonObject led_base = doc.createNestedObject("led_base");
+    led_base["r"] = lr;
+    led_base["g"] = lg;
+    led_base["b"] = lb;
+    doc["led_overlays"] = indication_overlays();
+    doc["led_source"] = indication_source();   // the layer on top: off | payload | sign | held | test | <overlay>
+    doc["led_brightness"] = indication_device_brightness();
+    power_held_led(&lr, &lg, &lb);
+    JsonObject led_held = doc.createNestedObject("led_held_boot");
+    led_held["r"] = lr;
+    led_held["g"] = lg;
+    led_held["b"] = lb;
     String body;
     serializeJson(doc, body);
     // Multi-device discovery counters (peer_manager.h), appended as a raw object.
@@ -1119,6 +1166,12 @@ void ConnectivityManager::loop() {
     wifi_link_loop(wifi_portal_ap_up() || ota_update_in_progress() || ota_arduino_in_progress());
     run_source_test();   // a paused POST /api/source/test, if any (blocks like a scheduled pull)
     run_pull_test();     // a paused POST /api/pull/test, likewise
+    if (_led_reconfigure) {          // POST /config: the mode, the dimmer, then the colour derived again
+        _led_reconfigure = false;
+        renderer_set_led_mode(_config.led_mode);
+        indication_set_device_brightness(_config.led_brightness);
+        led_recompute();
+    }
     if (_mqtt_reconfigure) {
         _mqtt_reconfigure = false;
         if (mqtt.connected()) {
@@ -1482,10 +1535,11 @@ bool ConnectivityManager::fetch_grid() {
     if (ok_n) {
         if (ok_n == n) { if (strncmp(_last_error, "pull:", 5) == 0) _last_error[0] = '\0'; }
         else setLastError(err);
-        // The LED rule follows the first ticker's direction (docs/TICKERS.md "What the screen shows").
-        uint8_t r, gg, b;
+        // The LED follows the first ticker's direction - the last known one
+        // when it failed this cycle (docs/TICKERS.md "What the screen shows").
         const GridCell& c0 = g->cells[0];
-        if (ticker_led_decide(renderer_led_rule(), false, 0, 0, 0, c0.ok && c0.change[0], c0.dir, &r, &gg, &b)) indication_led_rgb(r, gg, b);
+        led_model_render(false, 0, 0, 0, c0.has && c0.change[0] != '\0', c0.dir);
+        led_recompute();
         display_show_grid(g);
         s_grid_last.frame = *g;
         s_grid_last.crc = grid_last_crc();

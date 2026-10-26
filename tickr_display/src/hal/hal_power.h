@@ -41,7 +41,7 @@ void power_set_cell_divider(uint16_t num, uint16_t den);
 void power_get_cell_divider(uint16_t* num, uint16_t* den);
 
 // The colour the LED pins were pre-loaded with at this boot: the one the
-// previous deep sleep held (led_battery = hold, docs/DEVICE_UI.md "LED and
+// previous deep sleep held (led_sleep = keep, docs/DEVICE_UI.md "LED and
 // sound"), 0/0/0 after any other reset. main.cpp hands it to
 // indication_init() so the bar does not blink at a wake-up.
 void power_held_led(uint8_t* r, uint8_t* g, uint8_t* b);
@@ -131,7 +131,7 @@ void power_read_raw(PowerRaw* out);
 // Powers down peripherals (amplifier), drops the sense enable, latches the
 // GPIO levels and enters deep sleep. The LED pins are held at led_r/g/b
 // (each 0 = off, else on - full on, deep sleep has no PWM): 0/0/0 = dark,
-// the usual; a colour = `led_battery = hold` (led_battery_hold()). The
+// the usual; a colour = `led_sleep = keep` (led_sleep_hold()). The
 // display must already be put to sleep by the caller
 // (display_prepare_sleep()). Never returns.
 void power_deep_sleep(uint64_t sleep_time_us, uint8_t led_r, uint8_t led_g, uint8_t led_b);

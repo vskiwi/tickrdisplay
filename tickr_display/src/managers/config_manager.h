@@ -22,8 +22,12 @@
 // 10: led_battery (off | hold) - the LED through deep sleep (docs/DEVICE_UI.md "LED and sound");
 //    adc_cell_num/den 0/0 = auto (the board's divider, docs/HARDWARE.md "Power sensing").
 //    Migration: the old explicit default 189/100 is read as auto; any other value is kept.
+// 11: led_brightness (0..255, default 255) - the persistent LED dimmer (docs/DEVICE_UI.md "LED and sound").
+// 12: led_mode (off | payload | sign) + led_sleep (off | keep) - the derived LED model
+//    (docs/DEVICE_UI.md "LED and sound"). Migration: a file without led_mode takes it from
+//    led_rule (off -> off, sign -> sign); without led_sleep from led_battery (off -> off, hold -> keep).
 // Missing fields always fall back to their defaults, so older files load fine.
-#define CONFIG_SCHEMA_VERSION      10
+#define CONFIG_SCHEMA_VERSION      12
 #define CONFIG_REFRESH_MIN_MINUTES 1
 #define CONFIG_REFRESH_MAX_MINUTES 1440   // 24 h
 #define CONFIG_NAME_LEN            32
@@ -74,18 +78,26 @@ struct AppConfig {
     uint16_t adc_cell_num = 0;
     uint16_t adc_cell_den = 0;
 
-    // --- schema_version >= 7: ticker look ----------------------------------
-    // LED rule (logic/ticker.h LedRule): 0 = off - the payload's alert.led as
-    // before; 1 = sign - red / green by the payload's direction (`dir`, or
-    // the sign of `change`) when the payload carries no alert.led. Stored as
-    // "off" | "sign"; `led_rule` in GET /api/config and POST /config.
-    uint8_t led_rule = 0;
-    // --- schema_version >= 10: the LED through deep sleep ------------------
-    // logic/ticker.h LedBattery: 0 = off - the LED pins are held dark between
-    // wake-ups; 1 = hold - the base colour stays lit through the sleep while
-    // the level is >= LED_BATTERY_MIN_PCT. Stored as "off" | "hold";
-    // `led_battery` in GET /api/config and POST /config.
-    uint8_t led_battery = 0;
+    // --- the LED (docs/DEVICE_UI.md "LED and sound", logic/led_model.h) -----
+    // schema 12: what the content may do with the LED (LedMode): 0 = off -
+    // the content never lights it; 1 = payload - the colour of the current
+    // screen's alert.led; 2 = sign - red / green by the lead ticker's
+    // change, alert.led wins. Stored as "off" | "payload" | "sign";
+    // `led_mode` in GET /api/config and POST /config (`led_rule` is the
+    // accepted alias: off -> off, sign -> sign).
+    uint8_t led_mode = 0;
+    // schema 12: the LED through deep sleep (LedSleep): 0 = off - the pins
+    // are held dark between wake-ups; 1 = keep - the derived colour stays
+    // lit through the sleep while the level is >= LED_SLEEP_MIN_PCT. Stored
+    // as "off" | "keep"; `led_sleep` in GET /api/config and POST /config
+    // (`led_battery` is the accepted alias: off -> off, hold -> keep).
+    uint8_t led_sleep = 0;
+    // schema 11: 0..255 (LED_BRIGHTNESS_DEFAULT = 255): scales everything the
+    // LED shows - the derived colour (after a payload's alert.brightness),
+    // the test colour, the overlays and the flashes; 0 = the LED is dark.
+    // Applied through hal_indication at boot and after a save;
+    // `led_brightness` in GET /api/config and POST /config.
+    uint8_t led_brightness = 255;
 
     // --- schema_version >= 8: content source -------------------------------
     // What the device shows content from (logic/source.h SourceKind): only

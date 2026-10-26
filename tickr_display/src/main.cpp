@@ -22,7 +22,7 @@
 #include "logic/renderer.h"
 #include "logic/command_queue.h"
 #include "logic/battery.h"
-#include "logic/ticker.h"   // led_battery_hold(), led_success_blink()
+#include "logic/led_model.h"   // led_sleep_hold(), led_success_blink(), led_model_*
 #include "logic/status_policy.h"
 #include "logic/device_state.h"
 #include "logic/pull_scheduler.h"
@@ -194,17 +194,18 @@ static void refresh_shown_status() {
     display_set_status(shown_status, false);
 }
 
-// Deep sleep with the LED pins held dark - or, with `led_battery = hold` and
-// the level at or above LED_BATTERY_MIN_PCT, at the base colour (full on per
-// channel; docs/DEVICE_UI.md "LED and sound"). A brightness of 0 (the LED
-// dark while awake) holds nothing: the pads must not light up in the sleep.
+// Deep sleep with the LED pins held dark - or, with `led_sleep = keep` and
+// the level at or above LED_SLEEP_MIN_PCT, at the derived colour (full on
+// per channel; docs/DEVICE_UI.md "LED and sound"). A dark derived colour
+// (led_mode off, nothing to show) or a brightness of 0 - the payload's or
+// the device setting - holds nothing: the pads must not light up in the sleep.
 static void battery_sleep_minutes(uint32_t minutes) {
     Serial.printf("Entering Deep Sleep for %u minutes (fails=%u)\n", minutes, rtc_fail_count);
     rtc_slept_min += minutes;
     uint8_t r, g, b, hr, hg, hb;
     indication_get_rgb(&r, &g, &b);
-    if (indication_brightness() == 0) r = g = b = 0;
-    if (led_battery_hold(cm.getConfig().led_battery, shown_status.batt_known, shown_status.batt_pct, r, g, b, &hr, &hg, &hb))
+    if (indication_dark()) r = g = b = 0;
+    if (led_sleep_hold(cm.getConfig().led_sleep, shown_status.batt_known, shown_status.batt_pct, r, g, b, &hr, &hg, &hb))
         Serial.printf("LED: held %u/%u/%u through the sleep (%u%%)\n", hr, hg, hb, shown_status.batt_pct);
     display_prepare_sleep();
     power_deep_sleep((uint64_t)minutes * 60ULL * 1000000ULL, hr, hg, hb);
@@ -228,12 +229,10 @@ static void battery_fail(uint32_t interval_min) {
 }
 
 // The end-of-wake blink after a successful fetch: green 300 ms, then the
-// base colour - unless the sign rule coloured the LED, in which case that
+// base colour - unless the sign mode coloured the LED, in which case that
 // colour is the news and stays (docs/DEVICE_UI.md "LED and sound").
 static void battery_success_blink() {
-    uint8_t r, g, b;
-    indication_get_rgb(&r, &g, &b);
-    if (!led_success_blink(renderer_led_rule(), r, g, b)) return;
+    if (!led_success_blink(led_model_source())) return;
     indication_flash(0, 255, 0, 300);
     delay(310);
     indication_loop();
@@ -289,10 +288,12 @@ void setup() {
     bool enter_recovery = recovery_boot(reset_kind);
     log_flash_info();
 
-    // The LEDs start at the colour the deep sleep held (led_battery = hold), else off.
+    // The LEDs start at the colour the deep sleep held (led_sleep = keep),
+    // else off; the early config read below derives the colour properly.
     uint8_t held_r, held_g, held_b;
     power_held_led(&held_r, &held_g, &held_b);
     indication_init(held_r, held_g, held_b);
+    led_model_set_held(held_r, held_g, held_b);
 
     // The power-source override (AppConfig::power_source) and the cell
     // divider must be known before the USB/battery decision below, i.e.
@@ -312,6 +313,13 @@ void setup() {
             config_load(*early);
             power_set_mode((PowerMode)early->power_source);
             power_set_cell_divider(early->adc_cell_num, early->adc_cell_den);
+            // The LED mode and dimmer before anything lights the bar (the
+            // battery flow's fetch runs before cm.init() applies them again):
+            // the held colour stays as the first base colour unless the mode
+            // is off, then the first render derives the colour anew.
+            renderer_set_led_mode(early->led_mode);
+            indication_set_device_brightness(early->led_brightness);
+            led_recompute();
             early_has_source = source_pull_kind(early->source_kind, early->pull_url[0] != '\0') != SRC_KIND_NONE;
             delete early;
         }
@@ -401,6 +409,10 @@ void setup() {
     // returns false on failure.
     bool connected = cm.init(onData, battery);
     refresh_shown_status();
+    // The battery flow does not run the state machine: the BATTERY LOW LED
+    // rule (docs/DEVICE_UI.md "LED and sound") is applied here, before the
+    // fetch writes the base colour.
+    if (battery) indication_overlay(LED_OVL_BATT_LOW, device_battery_low(shown_status.power, shown_status.batt_known, shown_status.batt_pct));
     // The window needs the link; without it the wake fails like any other.
     if (setup_window && connected) {
         setup_window_until = millis() + DS_SETUP_WINDOW_MS;

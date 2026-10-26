@@ -223,29 +223,46 @@ function moveTo(d,x,y){if(x<0||y<0||x>15||y>15||(x==d.x&&y==d.y&&!d.tmp))return;
 if(o){o.x=d.x;o.y=d.y;o.tmp=false;ch.push(o)}d.x=x;d.y=y;d.tmp=false;paint();saveLayout(ch)}
 // ---- device sheet (docs/WEB_UI.md "Device sheet contents"): a click on the card opens the device's page as a sheet - header
 // (name + state word, state colours), Status (labelled pairs), Showing (what the screen shows; Change... = the Content
-// editor as the second step), Actions (Identify, Rename, Move, Clear pending; LED/sound as a "test" disclosure),
-// Device (Open device page, Forget - offline/stale only, never this device). A second click on the same card closes
-// it; a click on another card replaces the content. Desktop: a panel docked to the right; mobile: the bottom sheet.
+// editor as the second step), Actions (Identify, Rename, Move, Clear pending), LED (the device's LED settings, saved at
+// once; the test colour and sound as a disclosure), Device (Open device page, Forget - offline/stale only, never this
+// device). A second click on the same card closes it; a click on another card replaces the content. Desktop: a panel
+// docked to the right; mobile: the bottom sheet.
 var M=null,SN={mqtt:'MQTT',url:'URL',text:'Text',ticker:'Ticker'};
 function srcOf(c){return c.source_kind=='ticker'?'ticker':c.mqtt_server?'mqtt':c.pull_url?'url':'text'}
 function kv(a){var h='',i;for(i=0;i<a.length;i+=2)if(a[i+1]!=null)h+='<span>'+a[i]+'</span><span>'+a[i+1]+'</span>';return h}
-function openMenu(d){if(M==d){closeMenu();return}var m=$('menu'),s=d.si||{},b=bst(d),ss=d.ss,pp=pend(d,'payload'),po=pend(d,'ota'),fg=(b=='offline'||b=='stale')&&!d.self,r=d.rssi||s.rssi;M=d;ceClose();
+// The LED block needs the device's settings (GET /api/config, token): read once per card, kept on its record (d.cfg,
+// shared with the Content editor) and redrawn into the open sheet when it arrives.
+function openMenu(d){if(M==d){closeMenu();return}M=d;ceClose();menuDraw();
+if(!d.cfg&&!RO&&!bst(d))req(base(d),'/api/config').then(function(j){if(j._s==200){d.cfg=j;if(M==d)menuDraw(1)}}).catch(function(){})}
+function menuDraw(keep){var d=M,m=$('menu'),s=d.si||{},b=bst(d),ss=d.ss,pp=pend(d,'payload'),po=pend(d,'ota'),fg=(b=='offline'||b=='stale')&&!d.self,r=d.rssi||s.rssi,top=m.scrollTop;
 m.innerHTML='<div class="hd"><b>'+esc(d.name)+'</b><span class="bd s-'+(b||'online')+'">'+(b||'online')+'</span>'+(d.self?'<span class="bd b-ok">this device</span>':'')+'<button class="x" onclick="closeMenu()" title="Close">&times;</button></div>'+
 '<h4>Status</h4><div class="kv">'+kv(['Address',d.ip,'Power',(d.power||'?')+(s.vsys_v!=null?' '+(+s.vsys_v).toFixed(2)+' V':''),'Signal',r?r+' dBm':null,'Firmware',d.ver||null,'Uptime',s.uptime_s!=null?dur(s.uptime_s):null,'MQTT',s.mqtt_enabled==null?null:s.mqtt_enabled?(s.mqtt_connected?'connected':'disconnected'):'off',
 'Relay',d.idAt?(d.relay?'yes':'no'):null,'Pending',pp||po?(pp?'content':'')+(pp&&po?', ':'')+(po?'update':''):null,'Token',s.auth_enabled===false?'<span class="err">none</span>':null,'Error',s.last_error?'<span class="err">'+esc(s.last_error)+'</span>':null])+'</div>'+
 '<h4>Showing</h4><div class="row"><span class="t1">'+(ss?ss.state&&ss.state!='content'?ss.state:(d.cfg?SN[srcOf(d.cfg)]+' &middot; ':'')+esc(ss.title)+(ss.value?' / '+esc(ss.value):''):b||'&hellip;')+'</span><button class="sm w" onclick="content()">Change&hellip;</button></div>'+
 '<h4>Actions</h4><div class="row">'+(b&&b!='stale'?'':'<button class="sm w" onclick="identOne()" title="This device shows its shelf number for 30 s">'+(d.num?'Stop identify':'Identify this')+'</button>')+'<button class="sm w" onclick="rename()">Rename</button><button class="sm w" onclick="moveStart()" title="Then tap the destination">Move</button>'+(pp||po?'<button class="sm w" onclick="clearPending()" title="Forget what the relay holds for this device">Clear pending</button>':'')+'</div>'+
-(b&&b!='stale'?'':'<details><summary>Test LED &amp; sound</summary><div class="hint">A test only - nothing is saved, the next payload sets them again.</div>'+
-'<div class="row w"><span class="hint">LED</span><input type="color" id="mc" value="'+(d.pick||d.led||'#ffffff')+'" onchange="led()"><input type="range" id="mb" min="0" max="255" value="'+(d.bri==null?255:d.bri)+'" onchange="led()"><button class="sm" onclick="led(1)">Off</button></div>'+
+(b&&b!='stale'?'':'<h4>LED</h4>'+(d.cfg?LB(d.cfg):'<div class="hint">'+(RO?'settings need the API token':'&hellip;')+'</div>')+
+'<details><summary>Test</summary><div class="hint">Shows the colour for 10 s, then the LED goes back to what the settings say. Nothing is saved.</div>'+
+'<div class="row w"><span class="hint">LED</span><input type="color" id="mc" value="'+(d.pick||d.led||'#ffffff')+'"><button class="sm" onclick="led()">Test</button></div>'+
 '<div class="row w"><span class="hint">Sound</span><input type="range" id="mv" min="0" max="255" value="'+(d.vol==null?255:d.vol)+'" onchange="vol()"><button class="sm" onclick="beep()">Beep</button></div></details>')+
 (RO?'<div class="hint">Read-only - enter the API token in the bar above to control devices.</div>':'')+
 (d.self&&!fg?'':'<h4>Device</h4><div class="row">'+(d.self?'':'<a target="_blank" href="'+base(d)+'/">Open device page &#8599;</a>')+(fg?'<button class="sm danger w" onclick="forgetId(\''+d.id+'\')">Forget</button>':'')+'</div>');
-m.hidden=false;m.scrollTop=0;sheet(m)}
+m.hidden=false;m.scrollTop=keep?top:0;if(!keep)sheet(m)}
 function closeMenu(){$('menu').hidden=true;M=null;sheet()}
-// LED / sound through the dashboard's test endpoints (no new API): colour x brightness -> three PWM values.
+// LED settings (docs/DEVICE_UI.md "LED and sound"): the device derives the colour from the mode and what it shows -
+// mode (off / colour from content / red-green by change), brightness (a persistent dimmer over everything, 0 = dark)
+// and the LED through deep sleep (off, or keep the derived colour while the cell is at 30 % or more). Each change is
+// saved at once with POST /config (token, as the other card actions) and kept across payloads and restarts.
+var LM=[['off','Off','the content never lights the LED'],['payload','Colour from content','the colour a payload sends (alert.led)'],['sign','Red / green by change','red = down, green = up, by the first ticker']];
+function LB(c){var v=c.led_brightness==null?255:+c.led_brightness,m=c.led_mode||'off',h='';LM.forEach(function(o){if(o[0]==m)h=o[2]});
+return'<div class="row"><select id="lm" style="width:auto" onchange="ledSet(\'led_mode\',this.value)">'+LM.map(function(o){return'<option value="'+o[0]+'"'+(o[0]==m?' selected':'')+'>'+o[1]}).join('')+'</select><span class="hint">'+h+'</span></div>'+
+'<div class="row"><input type="range" id="lb" min="0" max="255" value="'+v+'" oninput="$(\'lbh\').textContent=Math.round(this.value/2.55)+\' %\'" onchange="ledSet(\'led_brightness\',+this.value)"><span class="hint">Brightness <b id="lbh">'+Math.round(v/2.55)+' %</b> - dims every colour, 0 = LED off</span></div>'+
+'<div class="row"><select id="ls" style="width:auto" onchange="ledSet(\'led_sleep\',this.value)"><option value="off">Off while asleep<option value="keep"'+(c.led_sleep=='keep'?' selected':'')+'>Keep the colour while asleep</select><span class="hint">on battery; <b>keep</b> shortens battery life several times</span></div>'}
+function ledSet(k,v){var d=M,o={};o[k]=v;req(base(d),'/config','POST',o).then(function(j){if(j._s==200){d.cfg[k]=v;d.ledAt=Date.now()-27000;st('LED: saved on '+d.name,'ok');if(M==d)menuDraw(1)}else st('Error: '+(j._s==401?'401 - token?':'HTTP '+j._s),'err')}).catch(function(e){st('Error: '+e.message,'err')})}
+// Test colour / sound through the dashboard's test endpoints: the colour -> three PWM values of the device's temporary
+// test layer (10 s; its dimmer `led_brightness` scales them on the device, so no brightness is baked in here).
 function test(d,p){return req(base(d),'/api/test/'+p,'POST').then(function(j){if(j._s!=202)st('Error: '+(j.error||j._s),'err')}).catch(function(e){st('Error: '+e.message,'err')})}
-function led(off){var d=M,c=$('mc').value,b=+$('mb').value,v=[1,3,5].map(function(i){return off?0:Math.round(parseInt(c.substr(i,2),16)*b/255)});
-['red','green','blue'].forEach(function(ch,i){test(d,'led_'+ch+'_pwm?val='+v[i])});d.pick=c;d.bri=b;d.led=off?null:'#'+v.map(hx).join('');d.ledAt=Date.now()-27000;paint();cacheSave()}
+function led(){var d=M,c=$('mc').value,v=[1,3,5].map(function(i){return parseInt(c.substr(i,2),16)});
+['red','green','blue'].forEach(function(ch,i){test(d,'led_'+ch+'_pwm?val='+v[i])});d.pick=c;d.led='#'+v.map(hx).join('');d.ledAt=Date.now()-27000;paint();cacheSave()}
 function vol(){M.vol=+$('mv').value;test(M,'volume?val='+M.vol)}
 function beep(){test(M,'beep')}
 // ---- Content editor (docs/WEB_UI.md "Change what a device shows"): what one device shows, as a sheet over the shelf.
@@ -305,8 +322,7 @@ function ceBack(){var d=C.d;ceClose();openMenu(d)}
 function shelfAll(){return place().list.filter(function(x){return x.ip})}
 function ceGroup(g){shelfAll().forEach(function(x){C.sel[x.id]=g?(GR[g]||[]).indexOf(x.id)>=0:bst(x)!='offline'});C.grp=g;ceDraw()}
 function groupSave(){var ids=Object.keys(C.sel).filter(function(k){return C.sel[k]}),n=prompt('Name for this group of devices (max 31 chars)',C.grp||'');if(!n||!n.trim())return;GR[n.trim().slice(0,31)]=ids;C.grp=n.trim().slice(0,31);saveLayout([]);ceDraw()}
-// LED through deep sleep (per device): off, or hold the colour while the cell is at 30 % or more
-function LB(c){return'<div class="row"><select id="cq" style="width:auto"><option value="off">LED off while asleep (battery)<option value="hold"'+(c.led_battery=='hold'?' selected':'')+'>LED stays on while asleep, down to 30 %</select><span class="hint">on battery; <b>hold</b> shortens battery life several times</span></div>'}
+// The LED settings are the device's (the sheet's LED block), not the content's: the editors below carry none.
 function ceDraw(){var d=C.d||{},c=C.cfg||{},s=C.src,b=C.all?'':bst(d),off=b=='offline'||b=='asleep',ss=d.ss||{},e=$('ce'),gs=Object.keys(GR),
 h='<div class="hd"><b>Content - '+(C.all?'all devices':esc(d.name))+'</b><button class="x" onclick="ceClose()" title="Close">&times;</button></div>'+(C.all?'':'<div class="hint">'+d.ip+(off?' &middot; <span class="err">'+b+' - plug it in (USB) to change what it shows</span>':'')+'</div>')+
 '<label>Source</label><select id="cs" onchange="C.src=this.value;C.touched=1;ceDraw()"><option value="text">Text<option value="ticker">Ticker<option value="url">Custom JSON URL'+(C.all?'':'<option value="mqtt">MQTT<option value="push">Push only')+'</select>';
@@ -314,9 +330,8 @@ if(C.all)h+='<label>Devices</label>'+(gs.length?'<select id="cg" onchange="ceGro
 shelfAll().map(function(x){var y=bst(x);return'<div class="row"><input type="checkbox" id="t_'+x.id+'"'+(C.sel[x.id]?' checked':'')+(y=='offline'?' disabled':'')+' onchange="C.sel[\''+x.id+'\']=this.checked"><label for="t_'+x.id+'" style="display:inline;margin:0">'+esc(x.name)+'</label><span class="hint">'+(y=='asleep'?'asleep - via relay':y||'online')+'</span></div>'}).join('')+
 '<div class="row"><button class="sm w" onclick="groupSave()" title="Remember the ticked devices under a name (in layout.json)">Save selection as group</button></div>';
 if(s=='text')h+='<label>Title</label><input type="text" id="ct" maxlength="63" value="'+esc(ss.title)+'"><label>Value</label><input type="text" id="cv" maxlength="127" value="'+esc(ss.value)+'">'+
-'<details><summary>Reactions</summary><div class="row"><input type="checkbox" id="cl"><input type="color" id="cc" value="'+(d.led||'#000000')+'"><span class="hint">LED (unticked = unchanged)</span></div>'+
-'<div class="row"><select id="cn" style="width:auto"><option value="">no sound<option>beep<option>double_beep<option>long_beep</select><input type="range" id="cw" min="0" max="255" value="'+(d.vol==null?255:d.vol)+'"><span class="hint">volume</span></div>'+
-(C.all?'':'<div class="row"><select id="cr" style="width:auto"><option value="off">LED as sent<option value="sign"'+(c.led_rule=='sign'?' selected':'')+'>LED by change: red / green</select><span class="hint">rule for payloads with <code>change</code> / <code>dir</code></span></div>'+LB(c))+'</details>';
+'<details><summary>Reactions</summary><div class="row"><input type="checkbox" id="cl"><input type="color" id="cc" value="'+(d.led||'#000000')+'"><span class="hint">LED colour (shown when the device\'s LED mode is <i>Colour from content</i>)</span></div>'+
+'<div class="row"><select id="cn" style="width:auto"><option value="">no sound<option>beep<option>double_beep<option>long_beep</select><input type="range" id="cw" min="0" max="255" value="'+(d.vol==null?255:d.vol)+'"><span class="hint">volume</span></div></details>';
 else if(s=='ticker'){if(!C.rows){C.rows=rowsFrom(c);C.ri=0}var R=C.rows,g=C.tv!=null?C.tv:c.tk_view=='grid',r=R[C.ri],tp=r.preset||'coingecko',P=PR[tp],cu=tp=='custom',sel=function(i,v,o){return'<select id="'+i+'" style="width:auto">'+o.map(function(x){return'<option value="'+x[0]+'"'+(String(v)==x[0]?' selected':'')+'>'+x[1]}).join('')+'</select>'},
 ps=function(i,v){return'<select id="'+i+'" style="width:auto" onchange="rowSync();ceDraw()">'+Object.keys(PR).map(function(k){return'<option value="'+k+'"'+(k==v?' selected':'')+'>'+PR[k][0]}).join('')+'</select>'},
 cf='<label>URL</label><input type="text" id="tu" maxlength="127" placeholder="https://proxy.lan/quote/{s}" value="'+esc(r.url)+'"><div class="row"><input type="text" id="tpp" maxlength="31" placeholder="price path" value="'+esc(r.price)+'"><input type="text" id="tpc" maxlength="31" placeholder="change path (optional)" value="'+esc(r.change)+'"></div>'+
@@ -327,10 +342,10 @@ if(g)h+='<label>Tickers (top left, top right, bottom left, bottom right)</label>
 '<span class="tb"><button class="sm" onclick="rowMove('+i+',-1)" title="Up">&#9650;</button><button class="sm" onclick="rowMove('+i+',1)" title="Down">&#9660;</button><button class="sm" onclick="rowDel('+i+')" title="Remove"'+(R.length>1?'':' disabled')+'>&#10005;</button><button class="sm" id="tt'+i+'" onclick="tkTest('+i+')" title="One fetch on the device, nothing saved">Test</button></span></div>'}).join('')+
 '<div class="row">'+(R.length<4?'<button class="sm w" onclick="rowAdd()">+ Add ticker</button>':'')+'<span id="tr" class="hint"></span></div><div class="hint">Ticker '+(C.ri+1)+': '+P[3]+'. Each cell shows the short name, the change and the price (without cents when they do not fit); a source that fails keeps its last price with a ? instead of the change.</div>';
 else h+='<label>Market</label>'+ps('tp',tp)+'<div class="row"><input type="text" id="ts" maxlength="31" placeholder="symbol, e.g. '+P[1]+'" value="'+esc(r.symbol)+'"><input type="text" id="tm" maxlength="11" placeholder="market, e.g. '+P[2]+'" value="'+esc(r.market)+'"></div><div class="hint">'+P[3]+'</div>'+(cu?cf:'');
-h+='<label>Every N minutes</label><input type="number" id="ci" min="'+(g&&d.power=='battery'?15:1)+'" max="1440" value="'+(c.source_kind=='ticker'&&c.refresh_interval||5)+'"><div class="hint">'+(g?'A grid makes up to 4 fetches per cycle'+(d.power=='battery'?' - on battery 15 min is the floor (the device enforces it)':'')+'. ':'')+(d.power=='battery'?'On battery each fetch is a TLS handshake (~2 s awake); 15 min or more is kind to the cell, 1 min empties it in about two days. ':'')+(C.all?'Sleeping devices are skipped - a source can only be set while they are awake. ':'')+'Fetched over HTTPS against the built-in roots; the LED follows the sign'+(g?' of the first ticker':'')+' when the rule below says so.</div>'+
+h+='<label>Every N minutes</label><input type="number" id="ci" min="'+(g&&d.power=='battery'?15:1)+'" max="1440" value="'+(c.source_kind=='ticker'&&c.refresh_interval||5)+'"><div class="hint">'+(g?'A grid makes up to 4 fetches per cycle'+(d.power=='battery'?' - on battery 15 min is the floor (the device enforces it)':'')+'. ':'')+(d.power=='battery'?'On battery each fetch is a TLS handshake (~2 s awake); 15 min or more is kind to the cell, 1 min empties it in about two days. ':'')+(C.all?'Sleeping devices are skipped - a source can only be set while they are awake. ':'')+'Fetched over HTTPS against the built-in roots. The LED turns red / green by the change'+(g?' of the first ticker':'')+' when the device\'s LED mode (device sheet) says so.</div>'+
 '<details><summary>Advanced'+(g?' - ticker '+(C.ri+1):'')+'</summary>'+(g&&cu?cf:'')+'<label>Label (empty = symbol/market - market name)</label><input type="text" id="tl" maxlength="31" value="'+esc(r.label)+'">'+(g?'':sn)+
 '<div class="row">'+sel('td',r.decimals==null?255:r.decimals,[[255,'auto decimals'],[0,'0 decimals'],[1,'1'],[2,'2'],[3,'3'],[4,'4'],[5,'5'],[6,'6']])+sel('tx',r.sep||'space',[['space','thousands: space'],['comma','thousands: comma'],['none','no separator']])+'</div>'+
-(C.all?'':'<div class="row"><select id="cr" style="width:auto"><option value="off">LED as sent<option value="sign"'+(c.led_rule=='sign'?' selected':'')+'>LED by change: red / green</select><span class="hint">LED rule</span></div>'+LB(c))+'</details>'+
+'</details>'+
 (g?'':'<div class="row"><button class="sm w" id="tt" onclick="tkTest()" title="One fetch on the device, nothing saved">Test</button><span id="tr" class="hint"></span></div>')}
 else if(s=='url')h+='<label>URL returning a payload</label><input type="text" id="cu" maxlength="127" placeholder="http://server/api/data" value="'+esc(c.pull_url)+'"><label>Every N minutes</label><input type="number" id="ci" min="1" max="1440" value="'+(c.refresh_interval||60)+'">'+
 '<div class="hint">The device\'s Pull URL: fetched every N minutes - on battery at each wake-up, on USB on a timer - and shown as a payload. Expects <b>one JSON object</b> such as <code>{"title":"BTC","value":"67 890"}</code> (<code>change</code>, <code>dir</code>, <code>spark</code>, <code>alert</code> optional; a top-level array, or an object with none of these keys, is rejected and named in <i>Last error</i>) - <a target="_blank" href="https://github.com/vskiwi/tickrdisplay/blob/main/docs/API.md#payload-format">Payload format &#8599;</a>.'+(C.all?' Sleeping devices are skipped - a URL can only be set while they are awake.':'')+'</div>'+
@@ -341,9 +356,9 @@ h+='<div class="row">'+(s=='text'||s=='url'||s=='ticker'?'<button class="sm w" i
 e.innerHTML=h;e.hidden=false;$('cs').value=s;sheet(C.f?null:e);C.f=1}
 function ceSave(){var d=C.d,p,f,a={},r,cf={},c=C.cfg||{};$('cb').disabled=true;ceMsg('\u2026');
 if(C.src=='text'){p={title:$('ct').value,value:$('cv').value};if($('cl').checked)a.led=$('cc').value.slice(1);if($('cn').value){a.sound=$('cn').value;a.volume=+$('cw').value}if(a.led||a.sound)p.alert=a;
-// per device: the LED rule when it changed, and source_kind=text when a ticker was running (it would overwrite the text at its next fetch)
-if(!C.all){r=$('cr').value;if(r!=(c.led_rule||'off'))cf.led_rule=r;r=$('cq').value;if(r!=(c.led_battery||'off'))cf.led_battery=r;if(c.source_kind=='ticker')cf.source_kind='text';if(Object.keys(cf).length)req(base(d),'/config','POST',cf).then(function(j){if(j._s==200)C.cfg=Object.assign(c,cf)})}}
-else if(C.src=='ticker'){f=tkf();if(!C.all){r=$('cr').value;if(r!=(c.led_rule||'off'))f.led_rule=r;r=$('cq').value;if(r!=(c.led_battery||'off'))f.led_battery=r}}
+// per device: source_kind=text when a ticker was running (it would overwrite the text at its next fetch)
+if(!C.all&&c.source_kind=='ticker'){cf.source_kind='text';req(base(d),'/config','POST',cf).then(function(j){if(j._s==200)C.cfg=Object.assign(c,cf)})}}
+else if(C.src=='ticker')f=tkf();
 else f={source_kind:'url',pull_url:$('cu').value.trim(),refresh_interval:$('ci').value};
 if(C.all){var ids=Object.keys(C.sel).filter(function(k){return C.sel[k]}),rl=relayOf();
 pool(ids,function(id){var x=D[id],y=bst(x),away=y=='asleep'||y=='offline';

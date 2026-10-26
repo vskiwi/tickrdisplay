@@ -1,9 +1,9 @@
 #pragma once
 // Ticker look (docs/TICKERS.md "What the screen shows") - the pure parts, unit-tested on the
 // host (test/test_ticker): direction from a formatted change string, the
-// age line, the sparkline scaling and the LED rule. No Arduino, no drawing:
-// hal_display draws the frame from a TickerFields, renderer.cpp fills it
-// from a ScreenPayload and applies the LED rule.
+// age line and the sparkline scaling. No Arduino, no drawing: hal_display
+// draws the frame from a TickerFields, renderer.cpp fills it from a
+// ScreenPayload (the LED is derived separately - logic/led_model.h).
 #include <stdint.h>
 #include <stddef.h>
 
@@ -116,39 +116,3 @@ uint32_t grid_battery_interval_min(bool grid, uint32_t interval_min);
 typedef int16_t (*GridMeasureFn)(const char* text, uint8_t font_step, void* ctx);
 uint8_t grid_fit_price(const char* price, int16_t max_w, GridMeasureFn measure, void* ctx,
                        char* buf, size_t cap, const char** out);
-
-// LED rule (docs/TICKERS.md "What the screen shows"): the device setting.
-enum LedRule : uint8_t {
-    LED_RULE_OFF  = 0,   // the payload's alert.led as today (default)
-    LED_RULE_SIGN = 1,   // red on down, green on up, unchanged on flat
-};
-// "off" | "sign" <-> value (unknown strings -> off).
-const char* led_rule_str(uint8_t v);
-uint8_t     led_rule_parse(const char* s);
-// Decides the LED base colour for one payload. An explicit alert.led wins;
-// otherwise `sign` colours by `dir` when the payload carries a direction
-// (has_dir). Returns true when rgb should be written.
-bool ticker_led_decide(uint8_t rule, bool has_led, uint8_t pr, uint8_t pg, uint8_t pb,
-                       bool has_dir, TickerDir dir, uint8_t* r, uint8_t* g, uint8_t* b);
-
-// LED through deep sleep (docs/DEVICE_UI.md "LED and sound", AppConfig::led_battery):
-// off = the LED pins are held dark between wake-ups (default); hold = the
-// base colour stays lit through the sleep while the level is at or above
-// LED_BATTERY_MIN_PCT. Deep sleep has no PWM: a channel is fully on or off.
-enum LedBattery : uint8_t {
-    LED_BATTERY_OFF  = 0,
-    LED_BATTERY_HOLD = 1,
-};
-#define LED_BATTERY_MIN_PCT 30u
-// "off" | "hold" <-> value (unknown strings -> off).
-const char* led_battery_str(uint8_t v);
-uint8_t     led_battery_parse(const char* s);
-// What the pins are held at: the base colour thresholded per channel
-// (>= 128 = on) when `setting` is hold, the level is known and not below
-// the floor; dark otherwise (also when the base colour is dark - nothing to
-// hold). Returns true when any channel is lit.
-bool led_battery_hold(uint8_t setting, bool batt_known, uint8_t batt_pct,
-                      uint8_t r, uint8_t g, uint8_t b, uint8_t* hr, uint8_t* hg, uint8_t* hb);
-// The end-of-wake blink after a successful fetch (docs/DEVICE_UI.md "LED and sound"):
-// skipped when the sign rule gave the LED a colour - the colour is the news.
-bool led_success_blink(uint8_t rule, uint8_t r, uint8_t g, uint8_t b);

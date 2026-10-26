@@ -59,17 +59,17 @@ it. Everything about the fleet is on the toolbar and in the drawer.
 1. Click the card → device sheet → *Change…*.
 2. Choose the **Source**: *Text*, *Ticker*, *Custom JSON URL*, *MQTT* or
    *Push only*. The selector opens on the source the device uses now.
-3. *Text*: title and value, optional *Reactions* (LED colour, sound preset,
-   volume, LED rule, LED on battery) → *Send*. *Ticker*: *View* (one ticker, or the 2×2
+3. *Text*: title and value, optional *Reactions* (LED colour – shown when
+   the device's LED mode is *Colour from content* –, sound preset, volume)
+   → *Send*. *Ticker*: *View* (one ticker, or the 2×2
    grid with up to four rows – preset, symbol, market, short name, ▲ ▼ ✕,
    *Test* per row, *+ Add ticker*; the radio button picks the row whose
    *Advanced* settings are shown), market preset (CoinGecko, Kraken,
    Binance, Custom JSON), symbol / market, interval (a 15-minute floor on
    battery with a grid), optional *Test* (one fetch on the device, nothing
    saved), *Advanced* (label, short name for the panel badge, decimals,
-   separator, LED rule, LED on battery – `off`, or `hold` the colour through
-   the deep sleep down to 30 %, which shortens battery life several times;
-   [`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*) → *Save*
+   separator) → *Save*. The LED settings are not part of the content: they
+   live in the device sheet's *LED* block (below)
    ([`TICKERS.md`](TICKERS.md) → *Setting it up in the web UI*). *Custom JSON URL*: URL + interval → *Save*
    (what the URL must return and a complete example server: [`INTEGRATION_EXAMPLE.md`](INTEGRATION_EXAMPLE.md)).
    The hint under the field shows the shape – one JSON object,
@@ -82,8 +82,8 @@ it. Everything about the fleet is on the toolbar and in the drawer.
 4. The card's next frame poll shows the result.
 
 <p align="center">
-  <img src="images/content-editor-grid.png" width="400" alt="The Content editor in the 2x2 grid view: four ticker rows with preset, symbol, market and short name, up, down, remove and Test buttons per row, the interval field with the grid hint, the Advanced section for the selected row and the Save and Back buttons">
-  <img src="images/content-editor-ticker.png" width="400" alt="The Content editor for one device as a bottom sheet over the dimmed shelf: source Ticker, view One ticker, market Binance, symbol BTC and market USDT, the refresh interval, the Advanced section open with the label, the short name for the panel badge, decimals, separator and LED rule, and the Test, Save and Back buttons">
+  <img src="images/content-editor-grid.png" width="400" alt="The Content editor in the 2x2 grid view: four ticker rows from Binance, Kraken and CoinGecko with preset, symbol, market and short name, up, down, remove and Test buttons per row, the interval field with the grid hint, the collapsed Advanced section for the selected row and the Save and Back buttons">
+  <img src="images/content-editor-ticker.png" width="400" alt="The Content editor for one device as a bottom sheet over the dimmed shelf: source Ticker, view One ticker, market Binance, symbol BTC and market USDT, the refresh interval, the Advanced section open with the label, the short name for the panel badge, decimals and separator, and the Test, Save and Back buttons">
 </p>
 
 A sleeping or offline card says *plug it in (USB) to change what it shows*
@@ -209,14 +209,24 @@ are the browser's clock – the device has none.
 * **Showing** – the screen state, or *source · title / value* (a grid's
   title is its symbols, comma-separated), + *Change…*.
 * **Actions** – *Identify this* / *Stop identify*, *Rename*, *Move*, *Clear
-  pending* (when the relay holds something); *Test LED & sound* disclosure
-  (colour, brightness, *Off*; volume, *Beep* – a test only, the next payload
-  sets them again). Identify and the test are hidden for asleep / offline.
+  pending* (when the relay holds something). Identify is hidden for asleep /
+  offline.
+* **LED** – the device's LED settings, each saved at once with `POST /config`
+  when changed (token; read from `GET /api/config` when the sheet opens):
+  mode (*Off* · *Colour from content* · *Red / green by change*),
+  *Brightness* (0–100 %, 0 = LED off) and the LED while asleep (*Off while
+  asleep* · *Keep the colour while asleep*, on battery). The device derives
+  the colour from the mode and what it shows, so a change is visible at once
+  ([`DEVICE_UI.md`](DEVICE_UI.md) → *LED and sound*). A *Test* disclosure
+  below: a colour and *Test* (the LED shows it for 10 s, then goes back to
+  what the settings say; nothing is saved), volume and *Beep*. Hidden for
+  asleep / offline; without a token the block only says that the settings
+  need one. The settings are per device: *For all…* carries none of them.
 * **Device** – *Open device page ↗* (not on the host) and *Forget* (offline
   or stale cards only, never the host; confirm).
 
 <p align="center">
-  <img src="images/device-sheet.png" width="400" alt="The device sheet for the host device as a bottom sheet: header with the online and this-device badges, Status rows for address, power and cell voltage, signal, firmware, uptime, MQTT and relay, the Showing row with a Change button, the Identify this, Rename and Move actions and the Test LED and sound disclosure">
+  <img src="images/device-sheet.png" width="400" alt="The device sheet for the host device as a bottom sheet: header with the online and this-device badges, Status rows for address, power and cell voltage, signal, firmware, uptime, MQTT and relay, the Showing row with a Change button, the Identify this, Rename and Move actions, and the LED section with the mode select, the brightness slider, the while-asleep select and the collapsed Test disclosure">
 </p>
 
 ## Phone layout
@@ -242,7 +252,7 @@ sheets.
 > `/wifi` automatically.
 
 > **Unverified:** the device sheet's write actions with a token (*Change…* →
-> Send / Save, Rename, Move, Clear pending, Test LED & sound, Forget) have
+> Send / Save, Rename, Move, Clear pending, the *LED* block, Forget) have
 > not been exercised on hardware.
 
 ## Recovery mode

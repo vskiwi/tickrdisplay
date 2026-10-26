@@ -206,7 +206,7 @@ together.
 | USB / battery rule, rev A | rail(33) × 2.1 > **4.50 V** ⇒ usb, < **4.35 V** ⇒ battery (hysteresis) | measured points below |
 | USB / battery rule, rev B | rail(33) − cell(32) at the pin > **+80 mV** ⇒ usb, < **−30 mV** ⇒ battery, hold in between; `invalid` if a channel is ≥ 4080 or ≤ 8 raw | measured points below |
 | Stock percentage tiers, as cell voltage via the stock formula | ≤ 30 % "high" saving + icon ≈ 3.77 V; < 4 % sleep card ≈ 3.35 V; < 2 % off ≈ 3.30 V | stock firmware (interpretation) |
-| TickrDisplay battery thresholds | BATTERY LOW badge **15 % (≈ 3.62 V)**; EMPTY latch **3.30 V**, recover **3.45 V**; 5 % display steps; LED held through the sleep (`led_battery = hold`) down to **30 %** | `battery.h`, `device_state.h`, `ticker.h` |
+| TickrDisplay battery thresholds | BATTERY LOW badge **15 % (≈ 3.62 V)**; EMPTY latch **3.30 V**, recover **3.45 V**; 5 % display steps; LED held through the sleep (`led_sleep = keep`) down to **30 %** | `battery.h`, `device_state.h`, `led_model.h` |
 | Sense enable | GPIO 4 `PIN_BAT_SENSE_EN` high while awake (both revisions), low before deep sleep; 150 ms settle after the enable (the stock's `delay(150)`) | measured on rev B |
 
 ### Detector

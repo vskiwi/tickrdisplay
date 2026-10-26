@@ -74,6 +74,10 @@ private:
     bool _mqtt_configured = false;
     volatile bool _mqtt_reconfigure = false;
     volatile bool _pull_reconfigure = false;
+    // POST /config changed the LED settings: mode + dimmer applied and the
+    // colour derived again from loop() (main task, docs/DEVICE_UI.md "LED and sound").
+    volatile bool _led_reconfigure = false;
+
 
     bool _tls_insecure_used = false;
     char _last_error[96] = "";

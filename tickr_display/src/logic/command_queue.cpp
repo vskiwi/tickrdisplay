@@ -92,22 +92,23 @@ void command_execute(Command* cmd) {
             renderer_process_payload(s, cmd->len);
             break;
 
+        // The test endpoints write the temporary test layer of hal_indication
+        // (10 s, then the derived colour is back); the base colour is derived
+        // from the content only (docs/DEVICE_UI.md "LED and sound").
         case CMD_LED_RGB:
-            indication_led_rgb(cmd->a, cmd->b, cmd->c);
+            indication_test_rgb(cmd->a, cmd->b, cmd->c);
             break;
         case CMD_LED_SET_R:
-            indication_set_r(cmd->a);
+            indication_test_channel(0, cmd->a);
             break;
         case CMD_LED_SET_G:
-            indication_set_g(cmd->a);
+            indication_test_channel(1, cmd->a);
             break;
         case CMD_LED_SET_B:
-            indication_set_b(cmd->a);
+            indication_test_channel(2, cmd->a);
             break;
         case CMD_LED_BLINK:
-            indication_led(cmd->a != 0, cmd->b != 0, cmd->c != 0);
-            delay(500);
-            indication_led(false, false, false);
+            indication_test_rgb(cmd->a ? 255 : 0, cmd->b ? 255 : 0, cmd->c ? 255 : 0, 500);
             break;
 
         case CMD_VOLUME:
