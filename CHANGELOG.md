@@ -8,6 +8,8 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-10-26
+
 ### Added
 
 - **LED**: a *Brightness* setting (`led_brightness`, 0–255, default 255) –
@@ -363,7 +365,8 @@ the day of the release; the development history before it was private.
   gate for the web UI; `TICKR_LOG_VERBOSE` build flag for the informational
   serial log.
 
-[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/vskiwi/tickrdisplay/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/vskiwi/tickrdisplay/compare/v0.3.0...v0.3.1
