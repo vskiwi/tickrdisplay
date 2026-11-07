@@ -3,6 +3,7 @@
 #include "peer_manager.h"
 #include "../hal/hal_display.h"
 #include "../logic/screen_bmp.h"
+#include "../logic/command_queue.h"
 #include <Arduino.h>
 #include <esp_system.h>
 
@@ -144,7 +145,7 @@ static void handle_state(AsyncWebServerRequest* request) {
     // ("2x2"), tiles the filled cells, status_band the payload's `status`
     // (`status` here is the badge snapshot), symbols[] the titles.
     body += ",\"layout\":\"";
-    body += st.tiles ? tile_layout_str(st.tiles->layout) : st.grid ? "grid" : st.ticker ? "ticker" : "text";
+    body += st.raw ? "raw" : st.tiles ? tile_layout_str(st.tiles->layout) : st.grid ? "grid" : st.ticker ? "ticker" : "text";
     body += '"';
     if (st.tiles) {
         uint8_t filled = 0;
@@ -233,6 +234,68 @@ static void handle_identify(AsyncWebServerRequest* request) {
     request->send(200, CT_JSON, "{\"ok\":true}");
 }
 
+// POST /api/screen/raw: a ready frame as the content - exactly SCREEN_FRAME_LEN
+// bytes, Content-Type application/octet-stream, the format GET /api/screen/raw
+// serves (1 = black). Optional query led=RRGGBB sets the LED as a payload's
+// alert.led would. Queued like a payload; the main task draws it.
+struct RawBody {
+    size_t  got;                          // bytes received: a short body is rejected, never drawn
+    uint8_t px[SCREEN_FRAME_LEN + 3];     // + R,G,B when led= is given
+};
+
+static void collect_raw_body(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
+    if (total != SCREEN_FRAME_LEN || !web_auth_ok(request)) return;          // the final handler answers
+    if (index == 0) request->_tempObject = calloc(1, sizeof(RawBody));       // freed by ~AsyncWebServerRequest
+    RawBody* b = (RawBody*)request->_tempObject;
+    if (b && index == b->got && index + len <= SCREEN_FRAME_LEN) {
+        memcpy(b->px + index, data, len);
+        b->got += len;
+    }
+}
+
+static int hex_digit(char c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+static void handle_raw_post(AsyncWebServerRequest* request) {
+    REQUIRE_AUTH(request);
+    if (request->contentLength() != SCREEN_FRAME_LEN) {
+        request->send(400, CT_JSON, "{\"error\":\"body must be exactly 4736 bytes (296x128, 1 bpp, MSB first, 1 = black)\"}");
+        return;
+    }
+    RawBody* b = (RawBody*)request->_tempObject;
+    if (!b && ESP.getMaxAllocHeap() < sizeof(RawBody) + 1024) {
+        AsyncWebServerResponse* r = request->beginResponse(503, CT_JSON, "{\"error\":\"low memory, retry later\"}");
+        r->addHeader("Retry-After", "5");
+        request->send(r);
+        return;
+    }
+    if (!b || b->got != SCREEN_FRAME_LEN) {
+        request->send(400, CT_JSON, "{\"error\":\"incomplete raw body (send 4736 bytes with Content-Type: application/octet-stream)\"}");
+        return;
+    }
+    size_t n = SCREEN_FRAME_LEN;
+    if (request->hasParam("led")) {
+        const String& v = request->getParam("led")->value();
+        int d[6];
+        bool ok = v.length() == 6;
+        for (int i = 0; ok && i < 6; i++) ok = (d[i] = hex_digit(v[i])) >= 0;
+        if (!ok) {
+            request->send(400, CT_JSON, "{\"error\":\"led must be RRGGBB\"}");
+            return;
+        }
+        for (int i = 0; i < 6; i += 2) b->px[n++] = (uint8_t)(d[i] << 4 | d[i + 1]);
+    }
+    if (!command_queue_push(CMD_SCREEN_RAW, SRC_HTTP, (const char*)b->px, n, SCREEN_FRAME_LEN + 3)) {
+        request->send(503, CT_JSON, "{\"error\":\"queue full, retry later\"}");
+        return;
+    }
+    String body = "{\"status\":\"queued\",\"queue\":";
+    body += command_queue_depth();
+    body += "}";
+    request->send(202, CT_JSON, body);
+}
+
 void screen_api_loop() {
     int n = s_ident_n;
     if (n < 0) return;
@@ -251,6 +314,7 @@ void screen_api_loop() {
 void screen_api_register_routes(AsyncWebServer& server) {
     s_boot_id = (uint16_t)(esp_random() & 0xFFFF);
     server.on("/api/screen/raw", HTTP_GET, handle_raw);
+    server.on("/api/screen/raw", HTTP_POST, handle_raw_post, nullptr, collect_raw_body);
     server.on("/api/screen.bmp", HTTP_GET, handle_bmp);
     server.on("/api/screen/state", HTTP_GET, handle_state);
     server.on("/api/screen/identify", HTTP_POST, handle_identify, nullptr, collect_small_body);

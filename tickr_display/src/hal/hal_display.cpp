@@ -115,6 +115,8 @@ static GridFrame _grid = {};                 // the cells of a grid frame (docs/
 static bool      _grid_on = false;           // the content is the grid (_tk.ticker is set too: age line, stale)
 static TilesFrame _tiles = {};               // the cells of a payload's tile frame (docs/API.md "Tile layouts")
 static bool      _tiles_on = false;          // the content is a tile frame (_tk.ticker set as for the grid)
+static uint8_t   _raw[SCREEN_FRAME_LEN];     // a pushed ready frame (POST /api/screen/raw), 1 = black
+static bool      _raw_on = false;            // the content is _raw: drawn as is, no badges
 static uint32_t _stale_ms = DS_T_STALE_MIN_MS; // T_stale for the age line (display_set_stale_ms)
 static uint32_t _content_at_ms = 0;          // when the content was last shown (stale_s)
 static bool     _stale_fired = false;        // the stale crossing of this content already asked for its refresh (display_stale_crossed)
@@ -149,7 +151,7 @@ static uint32_t _refreshes_skipped = 0;      // badge changes folded into a late
 // Layout kind of the last BASE content frame: text / ticker / WAITING / the
 // 2x2 grid / a tile frame - the policy's layout_changed (cards and service
 // frames leave it alone, so the content back after one compares against its own kind).
-enum ShownKind : uint8_t { SHOWN_NONE = 0, SHOWN_TEXT, SHOWN_TICKER, SHOWN_WAITING, SHOWN_GRID, SHOWN_TILES };
+enum ShownKind : uint8_t { SHOWN_NONE = 0, SHOWN_TEXT, SHOWN_TICKER, SHOWN_WAITING, SHOWN_GRID, SHOWN_TILES, SHOWN_RAW };
 struct RtcFrame {
     uint8_t  px[SCREEN_FRAME_LEN];
     uint8_t  partials_since_full;
@@ -939,8 +941,9 @@ static void draw_base(uint8_t event) {
         if (_card == CARD_POWER_BATTERY) event = RP_EV_SERVICE;
         else { event = RP_EV_CONDITION; condition = true; }
     } else {
-        bool has = _last_title[0] || _last_message[0] || _grid_on || _tiles_on;
-        if (_grid_on) draw_grid(draw_badges());         // the badges first: the age line fits before them
+        bool has = _last_title[0] || _last_message[0] || _grid_on || _tiles_on || _raw_on;
+        if (_raw_on) memcpy(s_frame, _raw, SCREEN_FRAME_LEN);   // the sender owns every pixel
+        else if (_grid_on) draw_grid(draw_badges());    // the badges first: the age line fits before them
         else if (_tiles_on) draw_tiles(_tiles.status ? draw_badges() : SCREEN_W);   // status off: no badges, no age line
         else {
             if (has) draw_content();
@@ -948,7 +951,7 @@ static void draw_base(uint8_t event) {
             draw_badges();
         }
         _state = has ? SCREEN_CONTENT : SCREEN_WAITING;
-        kind = has ? (_grid_on ? SHOWN_GRID : _tiles_on ? SHOWN_TILES : _tk.ticker ? SHOWN_TICKER : SHOWN_TEXT) : SHOWN_WAITING;
+        kind = has ? (_raw_on ? SHOWN_RAW : _grid_on ? SHOWN_GRID : _tiles_on ? SHOWN_TILES : _tk.ticker ? SHOWN_TICKER : SHOWN_TEXT) : SHOWN_WAITING;
         // the title and the badge name: another name on the badge is a layout change too;
         // for the grid the set and order of the names, for tiles their key (names, styles, preset)
         if (_grid_on) title = grid_set_key(&_grid);
@@ -1099,6 +1102,7 @@ void display_show_content(const char* title, const char* message, const TickerFi
     else { memset(&_tk, 0, sizeof(_tk)); _tk.age_s = TICKER_AGE_UNKNOWN; }
     _grid_on = false;
     _tiles_on = false;
+    _raw_on = false;
     _content_at_ms = millis();
     if (!_content_at_ms) _content_at_ms = 1;
     _stale_fired = false;   // new content: its own crossing may ask once more
@@ -1112,6 +1116,7 @@ void display_show_grid(const GridFrame* g) {
     if (_grid.n > GRID_MAX) _grid.n = GRID_MAX;
     _grid_on = true;
     _tiles_on = false;
+    _raw_on = false;
     _last_title[0] = '\0';                       // the symbols, comma-separated: the shelf's Showing line
     for (uint8_t i = 0; i < _grid.n; i++) {
         if (i) strlcat(_last_title, ", ", sizeof(_last_title));
@@ -1134,6 +1139,7 @@ void display_show_tiles(const TilesFrame* f, const char* title) {
     if (_tiles.n > TILES_MAX) _tiles.n = TILES_MAX;
     _tiles_on = true;
     _grid_on = false;
+    _raw_on = false;
     // the Showing line: the payload's title, else the titles of the cells
     if (title && title[0]) strlcpy(_last_title, title, sizeof(_last_title));
     else tiles_join_titles(&_tiles, _last_title, sizeof(_last_title));
@@ -1141,6 +1147,23 @@ void display_show_tiles(const TilesFrame* f, const char* title) {
     memset(&_tk, 0, sizeof(_tk));
     _tk.ticker = true;                           // the age line and the stale crossing work as for one ticker
     _tk.age_s = f->age_s;
+    _content_at_ms = millis();
+    if (!_content_at_ms) _content_at_ms = 1;
+    _stale_fired = false;
+    _content_seq++;
+    _card = CARD_NONE;
+    draw_base(RP_EV_CONTENT);
+}
+
+void display_show_raw(const uint8_t* px) {
+    memcpy(_raw, px, SCREEN_FRAME_LEN);
+    _raw_on = true;
+    _grid_on = false;
+    _tiles_on = false;
+    strlcpy(_last_title, "raw", sizeof(_last_title));   // the shelf's Showing line
+    _last_message[0] = '\0';
+    memset(&_tk, 0, sizeof(_tk));                // no age line, no stale crossing: the sender owns the frame
+    _tk.age_s = TICKER_AGE_UNKNOWN;
     _content_at_ms = millis();
     if (!_content_at_ms) _content_at_ms = 1;
     _stale_fired = false;
@@ -1159,6 +1182,7 @@ void display_clear_content() {
     _tk.ticker = false;
     _grid_on = false;
     _tiles_on = false;
+    _raw_on = false;
     _content_at_ms = 0;
     _stale_fired = false;
 }
@@ -1246,6 +1270,7 @@ void display_get_state(DisplayState* out) {
     out->ticker_age_s = _tk.ticker ? ticker_total_age_s() : 0;
     out->grid = _grid_on ? &_grid : nullptr;
     out->tiles = _tiles_on ? &_tiles : nullptr;
+    out->raw = _raw_on;
 }
 
 void display_prepare_sleep() {
