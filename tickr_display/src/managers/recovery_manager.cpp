@@ -182,6 +182,9 @@ public:
     bool canHandle(AsyncWebServerRequest* r) const override {
         return r->url().startsWith("/api/recovery/");
     }
+    // Not trivial: otherwise AsyncWebServer skips the body and the form
+    // fields (token `mode`, factory `wifi`) never reach hasParam(.., true).
+    bool isRequestHandlerTrivial() const override { return false; }
     void handleRequest(AsyncWebServerRequest* r) override {
         const char* path = r->url().c_str() + strlen("/api/recovery/");
         bool post = r->method() == HTTP_POST;

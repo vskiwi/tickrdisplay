@@ -8,6 +8,13 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Recovery mode**: *New API token* always answered `400 mode=new|clear`
+  and *Factory reset* ignored *also forget the Wi-Fi network* – the
+  recovery routes' handler was "trivial" for AsyncWebServer, so the POST
+  form fields were never parsed.
+
 ## [0.6.0] - 2026-10-26
 
 ### Added
