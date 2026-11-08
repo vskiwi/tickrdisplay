@@ -306,11 +306,10 @@ browser keeps the token in `localStorage`.
 |---|---|---|---|
 | `POST` | `/api/screen` | token | Body = payload (`Content-Length` required; `411` without, `413` above 4096 B, `400` invalid, `202` queued) |
 | `GET` | `/api/screen/raw` | public | The frame on the e-ink: 4736 bytes, 296×128, 1 bit/pixel, rows top-down, MSB first, 1 = black. Headers `X-Screen-Width`, `X-Screen-Height`, `X-Screen-Format: 1bpp-msb`, `ETag` (+ `If-None-Match` → `304`). `503` + `Retry-After` while a pairing code is on the screen or heap is low |
-| `POST` | `/api/screen/raw` | token | Push a ready frame as the content: body exactly 4736 bytes in the `GET` format above (1 = black), `Content-Type: application/octet-stream`; optional query `led=RRGGBB` sets the LED as a payload's `alert.led` would (no direction). `202` queued, `400` wrong length / no body / bad `led`, `503` queue full. Drawn as is – no badges, no age line; condition cards and service frames still take precedence. Like a pushed payload it does not survive a restart |
+| `POST` | `/api/screen/raw` | token | Push a ready frame as the content: body exactly 4736 bytes in the `GET` format above (1 = black), `Content-Type: application/octet-stream` (a `form-urlencoded`, `multipart` or `text/plain` body is not delivered to the handler and answers `400`); optional query `led=RRGGBB` or `led=#RRGGBB` sets the LED as a payload's `alert.led` would (no direction). `202` queued, `411` without `Content-Length`, `413` above 4736 B, `400` short or incomplete body / bad `led`, `503` + `Retry-After` queue full or heap low. Behaves like a pushed payload: the frame is shown at once, drawn as is – no badges, no age line; a condition card (offline, battery) comes back on the next state tick. Like a pushed payload it does not survive a restart |
 | `GET` | `/api/screen.bmp` | public | The same frame as a 1-bit BMP (`Content-Disposition: inline`); same headers and `503` rules |
 | `GET` | `/api/screen/state` | public | What is shown – see [Screen state fields](#screen-state-fields) |
 | `POST` | `/api/screen/identify` | token | `{"n":2,"ttl_s":30}` (≤ 96 B): show `n` (1–99) large with the device name for `ttl_s` s (1–600), then return to the content; `{"n":0}` returns at once. `409` while a pairing code is shown |
-
 
 ### Status and configuration
 

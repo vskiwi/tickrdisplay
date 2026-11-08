@@ -207,7 +207,8 @@ are the browser's clock – the device has none.
   Signal, Firmware, Uptime, MQTT, Relay, Pending (content / update), Token
   *none* (red), Error.
 * **Showing** – the screen state, or *source · title / value* (a grid's
-  title is its symbols, comma-separated), + *Change…*.
+  title is its symbols, comma-separated; a frame pushed with
+  `POST /api/screen/raw` reads `raw`), + *Change…*.
 * **Actions** – *Identify this* / *Stop identify*, *Rename*, *Move*, *Clear
   pending* (when the relay holds something). Identify is hidden for asleep /
   offline.

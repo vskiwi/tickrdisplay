@@ -349,6 +349,55 @@ curl -X POST "http://<device-ip>/api/screen" -u ":<token>" \
 The same object published to the MQTT topic (default `tickr/display`) has
 the same effect on a USB-powered device.
 
+### Pushing a ready frame
+
+When your tool renders the whole picture itself – TTF fonts, icons, a chart –
+send the finished frame instead of a payload: `POST /api/screen/raw` takes
+the 296×128 1-bit frame `GET /api/screen/raw` serves (4736 bytes, rows
+top-down, MSB first, 1 = black) and shows it pixel-for-pixel, no badges and
+no age line. Format, status codes and the optional `led` query are in
+[`API.md`](API.md) → *Screen*. With Pillow the only step beyond `tobytes()`
+is an inversion – its mode `1` has 1 = white, the device wants 1 = black:
+
+```python
+#!/usr/bin/env python3
+"""Render a 296x128 frame with Pillow and push it to POST /api/screen/raw."""
+import urllib.request
+from PIL import Image, ImageDraw, ImageFont
+
+DEVICE, TOKEN = "<device-ip>", "<token>"
+W, H = 296, 128
+
+img = Image.new("1", (W, H), 1)  # Pillow mode "1": 1 = white
+d = ImageDraw.Draw(img)
+d.text((8, 8), "Hello from Pillow", font=ImageFont.load_default(), fill=0)
+d.rectangle((8, 60, 287, 119), outline=0, width=3)
+
+# Pillow packs rows top-down, MSB first, 37 bytes per row - the device's
+# format, except that the device wants 1 = black: invert every byte.
+frame = bytes(b ^ 0xFF for b in img.tobytes())
+assert len(frame) == 4736
+
+req = urllib.request.Request(
+    f"http://{DEVICE}/api/screen/raw?led=00FF00", data=frame, method="POST",
+    headers={"Content-Type": "application/octet-stream", "X-Api-Token": TOKEN})
+with urllib.request.urlopen(req) as r:
+    print(r.status, r.read().decode())  # 202 {"status":"queued","queue":1}
+```
+
+The same with `curl` from a file, and a round trip that reads the frame
+back from the panel to compare (the token is again the **device's** API
+token):
+
+```bash
+curl -X POST "http://<device-ip>/api/screen/raw?led=00FF00" -u ":<token>" \
+     -H 'Content-Type: application/octet-stream' --data-binary @frame.bin
+sleep 3 && curl -s "http://<device-ip>/api/screen/raw" -o shown.bin && cmp frame.bin shown.bin && echo identical
+```
+
+Like a pushed payload the frame does not survive a restart, and the next
+payload, ticker fetch or Pull URL frame replaces it.
+
 ## Several coins at once: tile layouts
 
 One `value` with every mover joined by `|` is cut to what fits one line.
