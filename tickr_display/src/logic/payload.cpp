@@ -22,6 +22,21 @@ static int hex_val(char c) {
     return -1;
 }
 
+bool payload_parse_rgb(const char* s, size_t len, uint8_t rgb[3]) {
+    if (!s) return false;
+    if (len > 0 && *s == '#') { s++; len--; }
+    if (len != 6) return false;
+    uint8_t out[3];
+    for (int i = 0; i < 3; i++) {
+        int hi = hex_val(s[i * 2]);
+        int lo = hex_val(s[i * 2 + 1]);
+        if (hi < 0 || lo < 0) return false;
+        out[i] = (uint8_t)((hi << 4) | lo);
+    }
+    memcpy(rgb, out, 3);
+    return true;
+}
+
 // Copies a string (or number rendered as text) into dst. Returns false on type/length error.
 static bool copy_text_field(JsonVariantConst v, const char* name, char* dst, size_t dst_len,
                             char* err, size_t err_len) {
@@ -61,20 +76,10 @@ static bool parse_led(JsonVariantConst v, ScreenPayload* out, char* err, size_t 
     }
     const char* s = v.as<const char*>();
     if (!s) s = "";
-    if (*s == '#') s++;
-    if (strlen(s) != 6) {
+    uint8_t rgb[3];
+    if (!payload_parse_rgb(s, strlen(s), rgb)) {
         set_err(err, err_len, "alert.led: expected 6 hex digits RRGGBB");
         return false;
-    }
-    uint8_t rgb[3];
-    for (int i = 0; i < 3; i++) {
-        int hi = hex_val(s[i * 2]);
-        int lo = hex_val(s[i * 2 + 1]);
-        if (hi < 0 || lo < 0) {
-            set_err(err, err_len, "alert.led: invalid hex digit");
-            return false;
-        }
-        rgb[i] = (uint8_t)((hi << 4) | lo);
     }
     out->has_led = true;
     out->r = rgb[0];

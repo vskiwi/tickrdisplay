@@ -482,8 +482,52 @@ void test_tiles_absent_keeps_single_payload_identical(void) {
     TEST_ASSERT_EQUAL_STRING("", ERR);
 }
 
+void test_parse_rgb_helper(void) {
+    // The colour parser alert.led and POST /api/screen/raw's led= share:
+    // six hex digits, either case, optional leading '#'.
+    uint8_t rgb[3] = {1, 2, 3};
+    TEST_ASSERT_TRUE(payload_parse_rgb("00FF80", 6, rgb));
+    TEST_ASSERT_EQUAL_UINT8(0x00, rgb[0]);
+    TEST_ASSERT_EQUAL_UINT8(0xFF, rgb[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x80, rgb[2]);
+    TEST_ASSERT_TRUE(payload_parse_rgb("#ff0000", 7, rgb));
+    TEST_ASSERT_EQUAL_UINT8(0xFF, rgb[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, rgb[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x00, rgb[2]);
+    TEST_ASSERT_TRUE(payload_parse_rgb("aAbBcC", 6, rgb));
+    TEST_ASSERT_EQUAL_UINT8(0xAA, rgb[0]);
+    TEST_ASSERT_EQUAL_UINT8(0xBB, rgb[1]);
+    TEST_ASSERT_EQUAL_UINT8(0xCC, rgb[2]);
+    // `len` bounds the input: a longer buffer is read only as far as told
+    TEST_ASSERT_TRUE(payload_parse_rgb("112233zzzz", 6, rgb));
+    TEST_ASSERT_EQUAL_UINT8(0x33, rgb[2]);
+    // rejected, and the output is left as it was
+    rgb[0] = 0x11; rgb[1] = 0x22; rgb[2] = 0x33;
+    TEST_ASSERT_FALSE(payload_parse_rgb("00FF8", 5, rgb));          // too short
+    TEST_ASSERT_FALSE(payload_parse_rgb("00FF800", 7, rgb));        // too long
+    TEST_ASSERT_FALSE(payload_parse_rgb("#00FF8", 6, rgb));         // '#' + 5
+    TEST_ASSERT_FALSE(payload_parse_rgb("##00FF80", 8, rgb));       // only one '#'
+    TEST_ASSERT_FALSE(payload_parse_rgb("0x00ff", 6, rgb));         // 'x' is not hex
+    TEST_ASSERT_FALSE(payload_parse_rgb("-00001", 6, rgb));
+    TEST_ASSERT_FALSE(payload_parse_rgb("00FF8G", 6, rgb));
+    TEST_ASSERT_FALSE(payload_parse_rgb("", 0, rgb));
+    TEST_ASSERT_FALSE(payload_parse_rgb("#", 1, rgb));
+    TEST_ASSERT_FALSE(payload_parse_rgb(nullptr, 6, rgb));
+    TEST_ASSERT_EQUAL_UINT8(0x11, rgb[0]);
+    TEST_ASSERT_EQUAL_UINT8(0x22, rgb[1]);
+    TEST_ASSERT_EQUAL_UINT8(0x33, rgb[2]);
+    // the same rules through alert.led
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"alert\":{\"led\":\"0x00ff\"}}"));
+    TEST_ASSERT_EQUAL_STRING("alert.led: expected 6 hex digits RRGGBB", ERR);
+    TEST_ASSERT_EQUAL(PAYLOAD_ERR_FIELD, parse("{\"alert\":{\"led\":\"#00FF\"}}"));
+    TEST_ASSERT_EQUAL(PAYLOAD_OK, parse("{\"alert\":{\"led\":\"#00FF80\"}}"));
+    TEST_ASSERT_TRUE(P.has_led);
+    TEST_ASSERT_EQUAL_UINT8(0x80, P.b);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
+    RUN_TEST(test_parse_rgb_helper);
     RUN_TEST(test_tiles_three_of_four_with_null);
     RUN_TEST(test_tiles_empty_forms_and_defaults);
     RUN_TEST(test_tiles_root_style_and_overrides);

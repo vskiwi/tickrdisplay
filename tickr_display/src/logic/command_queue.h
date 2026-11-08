@@ -38,7 +38,7 @@ struct Command {
     CommandType   type;
     CommandSource src;
     uint8_t a, b, c;
-    uint16_t len;       // strlen(str)
+    uint16_t len;       // byte length of str (binary for CMD_SCREEN_RAW - not strlen)
     char* str;          // heap copy (may be NULL)
 };
 

@@ -122,3 +122,9 @@ PayloadResult payload_parse(const char* json, size_t len, ScreenPayload* out,
 
 // Static description for a result code (never NULL).
 const char* payload_result_str(PayloadResult r);
+
+// Parses an LED colour as alert.led spells it: six hex digits RRGGBB with an
+// optional leading '#' (`s` of `len` bytes, need not be NUL-terminated).
+// Shared with POST /api/screen/raw's `led` query. false = wrong length or a
+// non-hex character; `rgb` is left untouched then.
+bool payload_parse_rgb(const char* s, size_t len, uint8_t rgb[3]);

@@ -4,6 +4,7 @@
 #include "../hal/hal_display.h"
 #include "../logic/screen_bmp.h"
 #include "../logic/command_queue.h"
+#include "../logic/payload.h"
 #include <Arduino.h>
 #include <esp_system.h>
 
@@ -244,8 +245,13 @@ struct RawBody {
 };
 
 static void collect_raw_body(AsyncWebServerRequest* request, uint8_t* data, size_t len, size_t index, size_t total) {
-    if (total != SCREEN_FRAME_LEN || !web_auth_ok(request)) return;          // the final handler answers
-    if (index == 0) request->_tempObject = calloc(1, sizeof(RawBody));       // freed by ~AsyncWebServerRequest
+    if (total != SCREEN_FRAME_LEN || !web_auth_ok(request)) return;          // the final handler answers 411/413/400
+    if (index == 0 && request->_tempObject == nullptr) {
+        // The same guard as the GET side: a push must never starve the pull path.
+        // Low heap -> nothing is collected and the final handler answers 503.
+        if (ESP.getMaxAllocHeap() < MIN_FREE_BLOCK) return;
+        request->_tempObject = calloc(1, sizeof(RawBody));                   // freed by ~AsyncWebServerRequest
+    }
     RawBody* b = (RawBody*)request->_tempObject;
     if (b && index == b->got && index + len <= SCREEN_FRAME_LEN) {
         memcpy(b->px + index, data, len);
@@ -253,18 +259,26 @@ static void collect_raw_body(AsyncWebServerRequest* request, uint8_t* data, size
     }
 }
 
-static int hex_digit(char c) {
-    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-}
-
+// Status codes as POST /api/screen: 411 without Content-Length, 413 above the
+// frame size, 400 for a short / incomplete body or a bad led, 503 (+ Retry-After)
+// when the heap or the queue is short.
 static void handle_raw_post(AsyncWebServerRequest* request) {
     REQUIRE_AUTH(request);
-    if (request->contentLength() != SCREEN_FRAME_LEN) {
+    size_t total = request->contentLength();
+    if (total == 0) {
+        request->send(411, CT_JSON, "{\"error\":\"raw frame body with Content-Length required\"}");
+        return;
+    }
+    if (total > SCREEN_FRAME_LEN) {
+        request->send(413, CT_JSON, "{\"error\":\"body too long (a frame is 4736 bytes: 296x128, 1 bpp, MSB first, 1 = black)\"}");
+        return;
+    }
+    if (total < SCREEN_FRAME_LEN) {
         request->send(400, CT_JSON, "{\"error\":\"body must be exactly 4736 bytes (296x128, 1 bpp, MSB first, 1 = black)\"}");
         return;
     }
     RawBody* b = (RawBody*)request->_tempObject;
-    if (!b && ESP.getMaxAllocHeap() < sizeof(RawBody) + 1024) {
+    if (!b && ESP.getMaxAllocHeap() < MIN_FREE_BLOCK) {
         AsyncWebServerResponse* r = request->beginResponse(503, CT_JSON, "{\"error\":\"low memory, retry later\"}");
         r->addHeader("Retry-After", "5");
         request->send(r);
@@ -277,14 +291,11 @@ static void handle_raw_post(AsyncWebServerRequest* request) {
     size_t n = SCREEN_FRAME_LEN;
     if (request->hasParam("led")) {
         const String& v = request->getParam("led")->value();
-        int d[6];
-        bool ok = v.length() == 6;
-        for (int i = 0; ok && i < 6; i++) ok = (d[i] = hex_digit(v[i])) >= 0;
-        if (!ok) {
+        if (!payload_parse_rgb(v.c_str(), v.length(), b->px + n)) {     // RRGGBB or #RRGGBB, as alert.led
             request->send(400, CT_JSON, "{\"error\":\"led must be RRGGBB\"}");
             return;
         }
-        for (int i = 0; i < 6; i += 2) b->px[n++] = (uint8_t)(d[i] << 4 | d[i + 1]);
+        n += 3;
     }
     if (!command_queue_push(CMD_SCREEN_RAW, SRC_HTTP, (const char*)b->px, n, SCREEN_FRAME_LEN + 3)) {
         request->send(503, CT_JSON, "{\"error\":\"queue full, retry later\"}");
