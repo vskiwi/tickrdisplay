@@ -3,6 +3,7 @@
 #include <unity.h>
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "logic/peer_table.h"
 #include "logic/beacon.h"
 
