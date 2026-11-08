@@ -8,6 +8,15 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Added
+
+- **API**: `POST /api/screen/raw` – push a ready 296×128 1-bit frame
+  (4736 bytes, the format `GET /api/screen/raw` serves, 1 = black) as the
+  content, with an optional `led=RRGGBB`. For senders that render their
+  own layout (Pillow, a dashboard renderer) instead of a JSON payload;
+  `GET /api/screen/state` reports it as layout `raw`
+  ([`docs/API.md`](docs/API.md) → *Screen*).
+
 ### Fixed
 
 - **Recovery mode**: *New API token* always answered `400 mode=new|clear`

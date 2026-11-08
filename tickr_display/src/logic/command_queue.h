@@ -25,6 +25,7 @@ enum CommandType : uint8_t {
     CMD_BEEP,           // a = preset: PayloadSound
     CMD_SCREEN_STATUS,  // str = status text
     CMD_SCREEN_MESSAGE, // str = "title\nmessage"
+    CMD_SCREEN_RAW,     // str = SCREEN_FRAME_LEN frame bytes (+ 3 bytes R,G,B when an LED colour was given)
 };
 
 enum CommandSource : uint8_t {

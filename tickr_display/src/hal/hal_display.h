@@ -58,6 +58,9 @@ void display_show_grid(const GridFrame* g);
 // cells are joined. Stored and drawn with one refresh; its own layout kind,
 // tiles_frame_key() its "title" for the refresh policy.
 void display_show_tiles(const TilesFrame* f, const char* title);
+// A ready frame (SCREEN_FRAME_LEN bytes, 1 bpp, rows top-down, MSB first,
+// 1 = black - the format of GET /api/screen/raw) as the content, drawn as is.
+void display_show_raw(const uint8_t* px);
 // T_stale for the ticker's age line (docs/DEVICE_UI.md "E-ink refresh rules": 3 x refresh interval,
 // min 10 min - device_stale_ms()). Past it the line reads "stale N min".
 void display_set_stale_ms(uint32_t ms);
@@ -164,5 +167,6 @@ struct DisplayState {
     uint32_t      ticker_age_s;      // total age of the quote: payload age_s + time on the panel ("age_s")
     const GridFrame* grid;           // the cells when the content is a grid frame (layout "grid"), else NULL
     const TilesFrame* tiles;         // the cells when the content is a tile frame (layout = the preset name), else NULL
+    bool          raw;               // the content is a pushed ready frame (layout "raw")
 };
 void display_get_state(DisplayState* out);

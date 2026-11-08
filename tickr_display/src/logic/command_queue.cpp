@@ -8,6 +8,7 @@
 #include "payload.h"
 #include "../hal/hal_indication.h"
 #include "../hal/hal_display.h"
+#include "screen_bmp.h"
 
 static QueueHandle_t s_queue = nullptr;
 static volatile uint32_t s_dropped = 0;
@@ -128,6 +129,16 @@ void command_execute(Command* cmd) {
             // without a title - the brand is on the splash only.
             display_show_message("", s);
             break;
+
+        case CMD_SCREEN_RAW: {
+            const bool has_led = cmd->len == SCREEN_FRAME_LEN + 3;
+            if (cmd->len != SCREEN_FRAME_LEN && !has_led) break;
+            const uint8_t* px = (const uint8_t*)cmd->str;
+            const uint8_t* rgb = px + SCREEN_FRAME_LEN;
+            LOGV("[%s] raw frame%s\n", command_source_str(cmd->src), has_led ? " + led" : "");
+            renderer_apply_raw(px, has_led, has_led ? rgb[0] : 0, has_led ? rgb[1] : 0, has_led ? rgb[2] : 0);
+            break;
+        }
 
         case CMD_SCREEN_MESSAGE: {
             // "title\nmessage"

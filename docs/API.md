@@ -306,11 +306,11 @@ browser keeps the token in `localStorage`.
 |---|---|---|---|
 | `POST` | `/api/screen` | token | Body = payload (`Content-Length` required; `411` without, `413` above 4096 B, `400` invalid, `202` queued) |
 | `GET` | `/api/screen/raw` | public | The frame on the e-ink: 4736 bytes, 296×128, 1 bit/pixel, rows top-down, MSB first, 1 = black. Headers `X-Screen-Width`, `X-Screen-Height`, `X-Screen-Format: 1bpp-msb`, `ETag` (+ `If-None-Match` → `304`). `503` + `Retry-After` while a pairing code is on the screen or heap is low |
+| `POST` | `/api/screen/raw` | token | Push a ready frame as the content: body exactly 4736 bytes in the `GET` format above (1 = black), `Content-Type: application/octet-stream`; optional query `led=RRGGBB` sets the LED as a payload's `alert.led` would (no direction). `202` queued, `400` wrong length / no body / bad `led`, `503` queue full. Drawn as is – no badges, no age line; condition cards and service frames still take precedence. Like a pushed payload it does not survive a restart |
 | `GET` | `/api/screen.bmp` | public | The same frame as a 1-bit BMP (`Content-Disposition: inline`); same headers and `503` rules |
 | `GET` | `/api/screen/state` | public | What is shown – see [Screen state fields](#screen-state-fields) |
 | `POST` | `/api/screen/identify` | token | `{"n":2,"ttl_s":30}` (≤ 96 B): show `n` (1–99) large with the device name for `ttl_s` s (1–600), then return to the content; `{"n":0}` returns at once. `409` while a pairing code is shown |
 
-`POST /api/screen/raw` (push a ready bitmap) is *not implemented*.
 
 ### Status and configuration
 
@@ -446,7 +446,7 @@ mDNS `tickrdisplay-xxxxxx.local`) is compiled into `tickr_dev` only and needs
 | `state` | `boot` · `setup` · `waiting` · `content` · `pairing` · `recovery` · `ota` · `identify` · `offline` · `battery_empty` · `power_to_battery` – what is on the panel now |
 | `card` | `none` · `offline` · `ota` · `battery_empty` · `power_to_battery` – the condition card that is the base frame, also while a service frame is on top |
 | `stale_s` | Seconds since the content was shown; `null` before the first payload |
-| `layout` | `text` · `ticker` · `grid` · a tile preset (`1x1` · `1x2` · `2x1` · `2x2`); a ticker frame adds `change`, `short` (the badge name, `""` = no badge), `dir` (−1/0/1), `age_s` (total age of the quote); a grid frame adds `symbols[]` and `shorts[]` in cell order and `age_s` of its oldest quote ([`TICKERS.md`](TICKERS.md) → *Several tickers on one panel: the 2×2 grid*); its `title` is the comma-separated symbols. A tile frame ([Tile layouts](#tile-layouts)) adds `tiles` (filled cells), `status_band` (the payload's `status`), `symbols[]` (the titles in cell order, `""` for an empty cell) and `age_s` |
+| `layout` | `text` · `ticker` · `grid` · a tile preset (`1x1` · `1x2` · `2x1` · `2x2`) · `raw` (a frame pushed with `POST /api/screen/raw`); a ticker frame adds `change`, `short` (the badge name, `""` = no badge), `dir` (−1/0/1), `age_s` (total age of the quote); a grid frame adds `symbols[]` and `shorts[]` in cell order and `age_s` of its oldest quote ([`TICKERS.md`](TICKERS.md) → *Several tickers on one panel: the 2×2 grid*); its `title` is the comma-separated symbols. A tile frame ([Tile layouts](#tile-layouts)) adds `tiles` (filled cells), `status_band` (the payload's `status`), `symbols[]` (the titles in cell order, `""` for an empty cell) and `age_s` |
 | `source`, `symbol` | What the device fetches on its own (`ticker` · `url` · `none`) and the first ticker's symbol (`""` otherwise) |
 | `power_switch`, `power_grace_s` | Runtime USB → battery switch: `off` · `idle` · `grace` · `blocked` · `restart`, seconds left in the grace |
 | `render_seq`, `rendered_at_s` | Frame counter and uptime of the last draw – poll these, fetch `raw` only on a change |

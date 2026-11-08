@@ -21,5 +21,9 @@ void renderer_apply(const ScreenPayload& p);
 void renderer_set_led_mode(uint8_t mode);
 void led_recompute();
 
+// A ready frame (POST /api/screen/raw): the LED as for a payload's alert.led
+// (no direction), then the frame. Blocking; main task only.
+void renderer_apply_raw(const uint8_t* px, bool has_led, uint8_t r, uint8_t g, uint8_t b);
+
 // Play a preset / RTTTL (blocking). `rtttl` is only used for SOUND_RTTTL.
 void renderer_play_sound(PayloadSound sound, const char* rtttl);

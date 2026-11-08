@@ -86,6 +86,12 @@ void renderer_apply(const ScreenPayload& p) {
     }
 }
 
+void renderer_apply_raw(const uint8_t* px, bool has_led, uint8_t r, uint8_t g, uint8_t b) {
+    led_model_render(has_led, r, g, b, false, 0);
+    led_recompute();
+    display_show_raw(px);
+}
+
 bool renderer_process_payload(const char* json, size_t len) {
     // ScreenPayload is ~1.7 KB; keep it off the (8 KB) loop task stack.
     ScreenPayload* p = (ScreenPayload*)malloc(sizeof(ScreenPayload));
