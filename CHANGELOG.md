@@ -8,6 +8,12 @@ Until `1.0.0` minor versions may contain breaking changes.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Docs**: `POST /api/screen/raw` in `docs/API.md` names which body
+  content types reach the handler (form types are consumed as a form, other
+  types pass through as bytes).
+
 ## [0.7.0] - 2026-11-08
 
 ### Added
